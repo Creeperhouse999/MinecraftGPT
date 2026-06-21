@@ -11,5 +11,9 @@ public class CopperGolemMod implements ModInitializer {
     @Override
     public void onInitialize() {
         LOG.info("[coppergolem] server init");
+        // Plan A foundation: reference the field so the persistent AttachmentType registers.
+        if (GolemAttachments.GOLEM_DATA == null) {
+            throw new IllegalStateException("golem attachment failed to register");
+        }
     }
 }
