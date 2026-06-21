@@ -173,6 +173,34 @@ Never in source, never committed.
 All handlers use only the shared AI primitives, so each is testable against a
 mock world.
 
+## Tools, Hotbar & Durability
+
+The golem must hold and use proper tools, not mine bare-handed.
+
+- **Hotbar:** in addition to the 27-slot storage, the golem has a small hotbar
+  (tool slots) and an "active tool". Mining requires a pickaxe equipped;
+  chopping requires an axe. (Dirt needs no tool, but stone/cobble do — the
+  golem still equips a pickaxe for any mine job to be safe.)
+- **Tool sourcing order** (run before a tool-requiring task starts, and again
+  whenever the active tool breaks):
+  1. Matching tool already in inventory/hotbar → equip it.
+  2. Else scan chests in radius for a matching tool → pull, equip.
+  3. Else have crafting materials (in inventory or pullable from chests) →
+     craft the tool. Craft-from-materials only: planks+sticks → wooden,
+     cobblestone+sticks → stone. (Sticks craftable from planks.)
+  4. Else gather materials by mining/chopping, then craft.
+  5. Still impossible → fail task with status (e.g. "no pickaxe and no
+     materials").
+- **Durability:** track the active tool's damage. When it is near breaking,
+  fetch or craft a replacement before continuing.
+- **Bulk jobs:** for large requests ("mine 1000 stacks of cobble"), the golem
+  estimates how many tools the job needs and pre-stocks **multiple** spare
+  tools (find + craft) so it never stalls mid-job. Stacking spares in the
+  hotbar/storage is expected behavior.
+- **Component:** a `ToolManager` owns this logic — `ensureTool(type)`,
+  `onToolBroken()`, `stockSpares(count)` — used by `MineTask` and `ChopTask`
+  via the primitives. Keeps tasks free of tool plumbing.
+
 ## Control UI (owner client only)
 
 - **Keybind:** default `G`, rebindable in MC Controls. Opens Control Screen.

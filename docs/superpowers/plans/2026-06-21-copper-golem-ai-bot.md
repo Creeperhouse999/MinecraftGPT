@@ -1365,3 +1365,175 @@ git commit -m "test: end-to-end tasks and friends-no-mod distribution verified"
 - **Provider:** Groq replaces Gemini fully. `GroqClient` in Task 4. Config field name `geminiKeys` retained to avoid churn but holds Groq `gsk_` keys (documented in Task 14).
 - **Type consistency:** `GolemPrimitives` methods used identically across MineTask/ChopTask/SortTask/controller. `Task` records match `TaskParser` output and `TaskDispatcher` switch.
 - **Open risk carried from spec:** Plan A vs B resolved in Task 0b before any task code; a custom entity stays forbidden.
+
+---
+
+## ADDENDUM A — Tools, Hotbar & Durability (added mid-execution)
+
+This addendum extends the plan with a golem tool system. It modifies **Task 5**
+(inventory gains a hotbar + tool helpers and new `GolemPrimitives` methods),
+adds **Task 5b** (`ToolManager`), and amends **Task 9 MineTask** and **Task 10
+ChopTask** to acquire a tool before working. Where this addendum and the
+original task text conflict, **this addendum governs**.
+
+### Task 5 amendment — GolemInventory hotbar + tool methods + primitives
+
+Add to `GolemInventory` (keep the 27 storage slots; add a 4-slot hotbar region
+and an active-tool index):
+
+```java
+package com.example.coppergolem.inventory;
+
+import net.minecraft.inventory.SimpleInventory;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.MiningToolItem;
+import net.minecraft.item.AxeItem;
+import net.minecraft.item.PickaxeItem;
+
+public class GolemInventory extends SimpleInventory {
+    public static final int STORAGE = 27;
+    public static final int HOTBAR = 4;          // tool slots
+    public static final int SIZE = STORAGE + HOTBAR; // 31 total; [27..30] = hotbar
+    private int activeTool = STORAGE;             // index into hotbar region
+
+    public GolemInventory() { super(SIZE); }
+
+    public boolean isStorageFull() {
+        for (int i = 0; i < STORAGE; i++) {
+            ItemStack s = getStack(i);
+            if (s.isEmpty() || s.getCount() < s.getMaxCount()) return false;
+        }
+        return true;
+    }
+
+    public ItemStack activeTool() { return getStack(activeTool); }
+    public void setActiveTool(int hotbarSlot) { this.activeTool = STORAGE + hotbarSlot; }
+
+    /** First hotbar/storage slot holding a pickaxe, or -1. */
+    public int findPickaxeSlot() { return findToolSlot(PickaxeItem.class); }
+    /** First hotbar/storage slot holding an axe, or -1. */
+    public int findAxeSlot() { return findToolSlot(AxeItem.class); }
+
+    private int findToolSlot(Class<?> toolType) {
+        for (int i = 0; i < size(); i++) {
+            ItemStack s = getStack(i);
+            if (!s.isEmpty() && toolType.isInstance(s.getItem())) return i;
+        }
+        return -1;
+    }
+
+    /** Move a stack into the hotbar region as the active tool. */
+    public void equipFromSlot(int slot) {
+        ItemStack tool = removeStack(slot);
+        setStack(activeTool, tool);
+    }
+
+    /** Active tool damaged within `margin` of breaking. */
+    public boolean activeToolNearBreaking(int margin) {
+        ItemStack t = activeTool();
+        if (t.isEmpty() || !t.isDamageable()) return false;
+        return (t.getMaxDamage() - t.getDamage()) <= margin;
+    }
+}
+```
+
+> Implementer: confirm the exact 26.2 item class names for pickaxe/axe in the
+> unobfuscated sources (`PickaxeItem`, `AxeItem`, or a unified `MiningToolItem` /
+> `ToolItem` with a `TagKey` material). If the dedicated classes do not exist in
+> 26.2, detect via the item's mining tag / `ToolComponent` instead. Use the real
+> 26.2 API; do not invent class names. Keep behavior identical: "is this stack a
+> pickaxe / an axe".
+
+Add these methods to the `GolemPrimitives` interface (and both impls in
+Task 13):
+
+```java
+    // tools
+    boolean equipTool(net.minecraft.item.ItemStack tool);     // set active tool
+    boolean craftTool(String toolId);                          // craft if mats present in inventory; true on success
+    java.util.List<net.minecraft.util.math.BlockPos> findTreeBases(int radius);
+    boolean hasCraftMaterials(String toolId);                  // planks+sticks / cobble+sticks present?
+```
+
+Update existing primitives so **`mineBlock` uses the active tool** (applies
+durability damage; if the active tool is empty/wrong, the block still breaks but
+the caller is expected to have equipped a tool via `ToolManager` first).
+
+### Task 5b — ToolManager (NEW)
+
+**Files:**
+- Create: `src/main/java/com/example/coppergolem/entity/ToolManager.java`
+
+**Interfaces:**
+- Consumes: `GolemPrimitives`, `GolemInventory`.
+- Produces:
+  - `enum ToolKind { PICKAXE, AXE }`
+  - `ToolManager(GolemPrimitives g)`
+  - `boolean ensureTool(ToolKind kind)` — runs the sourcing order:
+    (1) have it → equip; (2) find in chests → pull+equip; (3) craft from
+    materials in inventory/chests; (4) gather mats then craft; (5) return
+    false (caller fails the task). Returns true once a usable tool is active.
+  - `void maybeReplaceBeforeBreak(ToolKind kind, int margin)` — if active tool
+    near breaking, call `ensureTool` to get a fresh one.
+  - `void stockSpares(ToolKind kind, int count)` — for bulk jobs: find/craft up
+    to `count` spare tools into storage.
+  - `static String idFor(ToolKind kind)` — `"wooden_pickaxe"` / `"wooden_axe"`
+    by default; upgrades to `"stone_*"` when cobblestone is available.
+
+- [ ] **Step 1: Implement** the sourcing order using primitive methods
+  (`inventory().findPickaxeSlot()/findAxeSlot()`, `findChests`, `pullFromChest`,
+  `hasCraftMaterials`, `craftTool`, and for step 4 a short gather loop that mines
+  cobble or chops a nearby tree via `findTreeBases`/`mineBlock`). Keep under
+  ~200 lines; if larger, split crafting recipes into `ToolRecipes.java`.
+- [ ] **Step 2: Build** → `./gradlew build` BUILD SUCCESSFUL.
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/main/java/com/example/coppergolem/entity/ToolManager.java
+git commit -m "feat: tool manager (find/craft/durability/spares)"
+```
+
+### Task 9 MineTask amendment
+
+At task start, before the cell loop:
+
+```java
+        if (!toolManager.ensureTool(ToolManager.ToolKind.PICKAXE)) {
+            this.failed = "no pickaxe and no materials";
+            return true; // done (failed) — controller surfaces status()
+        }
+        long estBlocks = (long) spec.w() * spec.h() * spec.length();
+        toolManager.stockSpares(ToolManager.ToolKind.PICKAXE,
+            (int) Math.max(0, estBlocks / 120)); // ~120 blocks per wooden pickaxe
+```
+
+Each tick after a successful `mineBlock`, call
+`toolManager.maybeReplaceBeforeBreak(ToolManager.ToolKind.PICKAXE, 5);`. Add a
+`failed` field surfaced via `status()`. `MineTask` constructor gains a
+`ToolManager toolManager` parameter (supplied by `TaskDispatcher`/controller).
+
+### Task 10 ChopTask amendment
+
+At task start:
+
+```java
+        if (!toolManager.ensureTool(ToolManager.ToolKind.AXE)) {
+            this.failed = "no axe and no materials";
+            return true;
+        }
+```
+
+Each tick after a successful chop, call
+`toolManager.maybeReplaceBeforeBreak(ToolManager.ToolKind.AXE, 5);`. `ChopTask`
+constructor gains a `ToolManager toolManager` parameter.
+
+### TaskDispatcher amendment
+
+`create(...)` gains a `ToolManager toolManager` parameter and passes it to
+`new MineTask(m, origin, toolManager)` and `new ChopTask(c, findTreeBases,
+toolManager)`. `SortTask` does not take a tool manager.
+
+### GolemController amendment
+
+Construct one `ToolManager` from the controller's `WorldGolemPrimitives` and
+pass it into `TaskDispatcher.create(...)`.
