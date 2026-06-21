@@ -5,6 +5,7 @@ import net.minecraft.world.item.Item;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Tool-sourcing logic for the copper golem.
@@ -26,6 +27,14 @@ public class ToolManager {
     private static final int CHEST_SEARCH_RADIUS = 16;
     private static final int TREE_SEARCH_RADIUS  = 12;
     private static final int GATHER_ATTEMPTS      = 3;
+
+    /** Block registry paths that gatherCobble is permitted to mine. */
+    private static final Set<String> STONE_BLOCK_IDS = Set.of(
+            "stone",
+            "cobblestone",
+            "deepslate",
+            "cobbled_deepslate"
+    );
 
     private final GolemPrimitives g;
 
@@ -180,14 +189,15 @@ public class ToolManager {
     }
 
     private boolean gatherCobble() {
-        // Try to find and mine stone blocks near the golem
+        // Only mine stone/cobblestone variants — never grief builds, chests, or ores.
         BlockPos base = g.position();
         int gathered = 0;
         for (int dx = -3; dx <= 3 && gathered < GATHER_ATTEMPTS; dx++) {
             for (int dy = -1; dy <= 1 && gathered < GATHER_ATTEMPTS; dy++) {
                 for (int dz = -3; dz <= 3 && gathered < GATHER_ATTEMPTS; dz++) {
                     BlockPos candidate = base.offset(dx, dy, dz);
-                    if (g.mineBlock(candidate)) {
+                    String blockId = g.getBlockId(candidate);
+                    if (STONE_BLOCK_IDS.contains(blockId) && g.mineBlock(candidate)) {
                         gathered++;
                         g.pickupNearbyItems(3);
                     }

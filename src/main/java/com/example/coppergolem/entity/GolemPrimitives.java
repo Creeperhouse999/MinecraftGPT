@@ -72,6 +72,13 @@ public interface GolemPrimitives {
     /** Current block position of this golem. */
     BlockPos position();
 
+    /**
+     * Return the registry path of the block at {@code pos} (e.g. {@code "stone"},
+     * {@code "cobblestone"}), or an empty string if the position is unloaded.
+     * Used by ToolManager to filter which blocks may be mined during gather passes.
+     */
+    String getBlockId(BlockPos pos);
+
     /** The golem's inventory instance. */
     GolemInventory inventory();
 
