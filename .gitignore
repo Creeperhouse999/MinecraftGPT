@@ -1,6 +1,5 @@
-build/
 .gradle/
+build/
 run/
 config/golem.json
 *.class
-.superpowers/
