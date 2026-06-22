@@ -1,12 +1,20 @@
 package com.example.coppergolem.entity;
 
+import com.example.coppergolem.agent.AgentPlanner;
+import com.example.coppergolem.agent.PlanExecutor;
+import com.example.coppergolem.agent.PlanStep;
 import com.example.coppergolem.craft.CraftingHelper;
+import com.example.coppergolem.gemini.GroqClient;
 import com.example.coppergolem.inventory.GolemInventory;
+import com.example.coppergolem.net.Packets;
 import com.example.coppergolem.task.TaskHandler;
 import com.example.coppergolem.zone.ZoneManager;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.animal.golem.CopperGolem;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -36,6 +44,10 @@ public final class GolemController {
     private final ToolManager toolManager;
     private final CraftingHelper crafts;
 
+    /** Shared planner (null when no API keys configured) and its LLM client. */
+    private final AgentPlanner planner;
+    private final GroqClient groq;
+
     /** Manages health (20 HP), home point, and death-respawn logic. */
     private final GolemLife life;
 
@@ -43,16 +55,26 @@ public final class GolemController {
     private TaskHandler current;
     private boolean paused;
 
+    /** The active multi-step plan runner; null when no job is running. */
+    private PlanExecutor executor;
+
+    /** Whether the current job was started with owner pre-approval. */
+    private boolean jobPreApproved;
+
     public GolemController(UUID owner,
                            CopperGolem golem,
                            ServerLevel level,
                            GolemInventory inventory,
-                           ZoneManager zones) {
+                           ZoneManager zones,
+                           AgentPlanner planner,
+                           GroqClient groq) {
         this.owner = owner;
         this.golem = golem;
         this.level = level;
         this.inventory = inventory;
         this.zones = zones;
+        this.planner = planner;
+        this.groq = groq;
 
         // TODO(B8/B12): inject the real UI-backed approval gate. Until the
         // approval UI exists, auto-approve every acquire/craft request.
@@ -79,6 +101,18 @@ public final class GolemController {
      * access; the controller already holds its bound {@link ServerLevel}.
      */
     public void tick(ServerLevel level) {
+        // Drive the active plan, if any. The executor manages its own per-step
+        // task handlers; clear it once the plan finishes (or stops on failure).
+        if (executor != null) {
+            executor.tick(primitives);
+            if (executor.isDone()) {
+                executor = null;
+            }
+            return;
+        }
+
+        // Legacy single-task path (assign()-based) — retained for callers that
+        // drive a bare TaskHandler instead of a full plan.
         if (current == null || paused) {
             return;
         }
@@ -98,8 +132,12 @@ public final class GolemController {
         this.paused = false;
     }
 
-    /** Abandon the current task. */
+    /** Abandon the current task and/or plan. */
     public void stop() {
+        if (executor != null) {
+            executor.stop();
+            executor = null;
+        }
         this.current = null;
         this.paused = false;
     }
@@ -122,6 +160,18 @@ public final class GolemController {
 
     /** Human-readable status line for the UI. */
     public String status() {
+        if (executor != null) {
+            if (executor.isFailed()) {
+                return "failed: " + executor.errorInfo();
+            }
+            // Surface the first RUNNING step label, else fall back to a summary.
+            for (PlanExecutor.StepStateView v : executor.view()) {
+                if (v.state() == PlanExecutor.StepState.RUNNING) {
+                    return "running: " + v.label();
+                }
+            }
+            return "running";
+        }
         if (current == null) {
             return "idle";
         }
@@ -164,6 +214,16 @@ public final class GolemController {
         return gate;
     }
 
+    /** The shared planner (null when no API keys configured). */
+    public AgentPlanner planner() {
+        return planner;
+    }
+
+    /** The LLM client backing the planner (null when no API keys configured). */
+    public GroqClient groq() {
+        return groq;
+    }
+
     /** Returns the {@link GolemLife} that owns health and home-point logic. */
     public GolemLife life() {
         return life;
@@ -194,14 +254,54 @@ public final class GolemController {
     /**
      * Start a new job from a freeform natural-language prompt.
      *
-     * <p>TODO(B11): pass {@code text} to {@link com.example.coppergolem.agent.AgentPlanner}
-     * to produce a {@link com.example.coppergolem.agent.PlanExecutor} and assign it.
-     * {@code preApprove} bypasses the first approval gate when true.</p>
+     * <p>Asks the {@link AgentPlanner} to turn {@code text} into a list of
+     * {@link PlanStep}s, builds a {@link PlanExecutor} over them, and makes it the
+     * controller's active job. {@code preApprove} is recorded so the approval gate
+     * can auto-approve this job (see {@link #jobPreApproved}; full wiring is
+     * deferred to B12 — the placeholder gate currently auto-approves everything).</p>
      */
     public void startFromPrompt(String text, boolean preApprove) {
-        // TODO(B11): wire AgentPlanner → PlanExecutor → assign(executor)
+        this.jobPreApproved = preApprove;
+
+        if (planner == null || groq == null) {
+            com.example.coppergolem.CopperGolemMod.LOG.warn(
+                    "[coppergolem] startFromPrompt ignored — planner disabled (no API keys). text={}",
+                    text);
+            return;
+        }
+
+        String worldContext = buildWorldContext();
+        List<PlanStep> plan = planner.plan(text, worldContext);
+        if (plan == null || plan.isEmpty()) {
+            com.example.coppergolem.CopperGolemMod.LOG.warn(
+                    "[coppergolem] planner returned no steps for prompt: {}", text);
+            this.executor = null;
+            return;
+        }
+
+        // Replace any in-flight job with the new plan.
+        if (this.executor != null) {
+            this.executor.stop();
+        }
+        this.current = null;
+        this.paused = false;
+        this.executor = new PlanExecutor(plan, primitives, groq, zones, toolManager, crafts);
+
         com.example.coppergolem.CopperGolemMod.LOG.info(
-                "[coppergolem] startFromPrompt text={} preApprove={}", text, preApprove);
+                "[coppergolem] startFromPrompt text={} preApprove={} steps={}",
+                text, preApprove, plan.size());
+    }
+
+    /**
+     * Short world-context string handed to the planner: golem position plus a
+     * coarse nearby-chest count. Kept minimal for B11; richer inventory/tool
+     * serialization can be layered in later.
+     */
+    private String buildWorldContext() {
+        net.minecraft.core.BlockPos p = primitives.position();
+        int nearbyChests = primitives.findChests(16).size();
+        return "{\"pos\":[" + p.getX() + "," + p.getY() + "," + p.getZ() + "]"
+                + ",\"nearby_chests\":" + nearbyChests + "}";
     }
 
     /**
@@ -225,9 +325,34 @@ public final class GolemController {
      * @param instruction freeform instruction when choice is "custom"
      */
     public void receiveErrorChoice(String choice, String instruction) {
-        // TODO(B11/B12): route into PlanExecutor error handler
-        com.example.coppergolem.CopperGolemMod.LOG.info(
-                "[coppergolem] receiveErrorChoice choice={} instruction={}", choice, instruction);
+        if (executor == null) {
+            com.example.coppergolem.CopperGolemMod.LOG.info(
+                    "[coppergolem] receiveErrorChoice ignored — no active plan (choice={})", choice);
+            return;
+        }
+        switch (choice == null ? "" : choice.toLowerCase()) {
+            case "custom", "retry" -> executor.resumeWithInstruction(
+                    instruction == null ? "" : instruction);
+            case "skip", "diy", "yourself" -> executor.doItYourself();
+            case "abort", "stop" -> stop();
+            default -> com.example.coppergolem.CopperGolemMod.LOG.warn(
+                    "[coppergolem] unknown error choice: {}", choice);
+        }
+    }
+
+    /**
+     * Returns the current plan as a list of {@link Packets.StepLine} rows for the
+     * UI (sent via {@code ServerNetworking.sendPlanView}). Empty when idle.
+     */
+    public List<Packets.StepLine> planView() {
+        if (executor == null) {
+            return Collections.emptyList();
+        }
+        List<Packets.StepLine> out = new ArrayList<>();
+        for (PlanExecutor.StepStateView v : executor.view()) {
+            out.add(new Packets.StepLine(v.label(), v.state().name()));
+        }
+        return out;
     }
 
     /**

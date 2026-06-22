@@ -147,7 +147,9 @@ public final class GolemLife {
 
         // Build the new controller; GolemLife will be wired up by the new
         // controller's constructor call to initHealth above.
-        GolemController newController = new GolemController(owner, fresh, level, newInv, zones);
+        GolemController newController = new GolemController(
+                owner, fresh, level, newInv, zones,
+                controller.planner(), controller.groq());
 
         // Carry the same home point into the new GolemLife.
         newController.life().setHomePoint(homePoint);

@@ -37,6 +37,9 @@ public class CopperGolemMod implements ModInitializer {
     /** Built once at init from config; shared by every spawned controller. */
     private AgentPlanner planner;
 
+    /** The LLM client backing the planner; handed to each PlanExecutor. Null when no keys. */
+    private GroqClient groq;
+
     @Override
     public void onInitialize() {
         LOG.info("[coppergolem] server init");
@@ -57,10 +60,11 @@ public class CopperGolemMod implements ModInitializer {
             LOG.warn("[coppergolem] no API keys in {} — AgentPlanner disabled until keys are added.",
                     configFile);
             this.planner = null;
+            this.groq = null;
         } else {
             KeyPool pool = new KeyPool(config.geminiKeys(), System::currentTimeMillis);
-            GroqClient groq = new GroqClient(pool, config.model(), HttpClient.newHttpClient());
-            this.planner = new AgentPlanner(groq);
+            this.groq = new GroqClient(pool, config.model(), HttpClient.newHttpClient());
+            this.planner = new AgentPlanner(this.groq);
         }
 
         // ---- Networking + life hooks ------------------------------------------
@@ -151,17 +155,17 @@ public class CopperGolemMod implements ModInitializer {
         GolemInventory inventory = new GolemInventory();
         ZoneManager zones = new ZoneManager();
 
+        // Hand the shared planner + LLM client to the controller so its
+        // startFromPrompt can build a PlanExecutor (B11 wiring). The controller
+        // constructs its own ToolManager / CraftingHelper / primitives internally.
         GolemController controller =
-                new GolemController(owner, golem, level, inventory, zones);
+                new GolemController(owner, golem, level, inventory, zones, planner, groq);
         // Home point = spawn position so a respawn lands near the owner.
         controller.setHomePoint(pos);
         // GolemController's constructor already called GolemLife.initHealth (20 HP).
 
         GolemRegistry.INSTANCE.register(controller);
 
-        // TODO(B11/B12): the AgentPlanner (this.planner) is not yet handed to the
-        // controller — GolemController.startFromPrompt is still a stub. Wire the
-        // planner into the controller when PlanExecutor assignment lands.
         if (planner == null) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
                     "[golem] spawned (planner disabled — add API keys to config/golem.json)."));
