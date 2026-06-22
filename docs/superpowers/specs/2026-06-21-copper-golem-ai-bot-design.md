@@ -432,3 +432,43 @@ MineTask, ChopTask, GolemPrimitives (interface), TaskHandler, GolemInventory.
 - Permission flow: `ToolManager` gains an **ask-gate** hook (request → await
   owner approval) instead of fully-automatic craft/take, with per-job
   pre-approval bypass.
+
+---
+
+# Design Addition — Ore Mining
+
+Added to the agent-model scope. The golem mines ores, both incidentally and on
+demand.
+
+## Behavior
+
+- **Incidental:** while running a mine job, the golem also breaks any ore it
+  exposes (coal, copper, iron, gold, redstone, lapis, diamond, emerald — the
+  vanilla overworld ore set, plus nether variants if encountered). Drops go to
+  inventory. Zone protection still applies (never mine inside a protected zone).
+- **Targeted ore hunt:** a prompt like "get me 30 diamonds" plans an ore hunt —
+  strip-mine / tunnel at the appropriate Y-level for that ore until the quota is
+  met (or a step limit is hit). A new plan-step kind `ore_hunt` carries
+  `{ore, count, yLevel?}`; the planner fills a sensible Y from the ore table if
+  not given.
+
+## Pickaxe Tier
+
+- Each ore has a **minimum pickaxe tier** to drop (wood/stone for coal/copper/
+  iron-ore-as-block? — use vanilla rules: stone+ for iron/copper/lapis, iron+
+  for gold/redstone/diamond/emerald). The golem checks the tier before/at the
+  hunt.
+- If it lacks the required tier, it **acquires the right pickaxe first**: find in
+  chests, else craft — **subject to the ask-gate** (e.g. craft/take an iron
+  pickaxe). Iron+ tools are made from **iron ingots already available** (chests
+  or inventory); **no smelting** in this version. If the tier cannot be obtained
+  (no ingots, no existing pick), the hunt **fails** with a clear status
+  ("need iron pickaxe").
+
+## Data
+
+A small `Ores` table: ore id → {minTier, defaultYLevel}. Used by the planner
+(Y-level, tier) and by MineTask (recognize ore blocks to collect). Pickaxe tier
+ordering: wood < stone < iron < diamond < netherite. Tools are still acquired
+via the existing find-or-craft + ask-gate path (ToolManager/CraftingHelper),
+extended with iron/diamond recipes that consume existing ingots/diamonds.
