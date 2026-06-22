@@ -472,3 +472,24 @@ A small `Ores` table: ore id → {minTier, defaultYLevel}. Used by the planner
 ordering: wood < stone < iron < diamond < netherite. Tools are still acquired
 via the existing find-or-craft + ask-gate path (ToolManager/CraftingHelper),
 extended with iron/diamond recipes that consume existing ingots/diamonds.
+
+---
+
+# Design Addition — Item-Frame Chest Labels
+
+Chests can be labeled with an **item frame** to declare what category they hold.
+
+- An item frame placed on (or directly adjacent to) a chest, showing an item,
+  marks that chest as the **home for that item's whole category** — e.g. a frame
+  showing a dirt block makes the chest take dirt, coarse dirt, rooted dirt, dirt
+  path, etc (the dirt family), not just the exact item.
+- **Frame overrides the majority rule.** A framed chest is the destination for
+  its category regardless of what it currently holds most of. Unframed chests
+  fall back to the existing "majority home" rule.
+- The frame item's **category** is resolved the same way as item grouping: the
+  frame item is included in the Groq grouping call; the group that the frame item
+  belongs to is assigned to that chest as its home.
+- During SCAN, the golem reads item frames on/around each chest (via the
+  `ItemFrame` entity at the chest's faces) and records `chestId → framedItem`.
+  This map is sent to Groq so it can honor frame labels when producing the
+  `{item → group}` / group-home assignment.
