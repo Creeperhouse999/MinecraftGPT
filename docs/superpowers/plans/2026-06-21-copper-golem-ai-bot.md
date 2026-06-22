@@ -1537,3 +1537,284 @@ toolManager)`. `SortTask` does not take a tool manager.
 
 Construct one `ToolManager` from the controller's `WorldGolemPrimitives` and
 pass it into `TaskDispatcher.create(...)`.
+
+---
+
+## ADDENDUM B — Agent Model (supersedes the original Task 10–16 tail)
+
+The spec's "Design Revision — Agent Model" governs from here. The original plan's
+single-task dispatch (TaskDispatcher → one of Sort/Mine/Chop) is replaced by a
+**plan-ahead agent**: Groq returns an ordered plan; a `PlanExecutor` runs the
+steps with built-in autonomy; protected zones, health, crafting, torching, and
+an ask-gate are added. Already-built macros (SortTask, MineTask, ChopTask,
+ToolManager, SortPlanner, KeyPool, GroqClient, GolemConfig, GolemPrimitives,
+TaskHandler, GolemInventory) are reused. Where this conflicts with earlier task
+text, **Addendum B governs**.
+
+Tasks here are numbered B1, B2, … Build order respects dependencies.
+
+### Task B1 — Finish SortTask (the in-flight Task 11), zone-aware later
+
+Complete `SortTask` per the existing Task 11 brief (Groq grouping + SortPlanner +
+execute moves), using the real Mojmap registry API (`BuiltInRegistries.ITEM`,
+`ResourceLocation`). No zone logic yet (sorting is always allowed, even in
+zones). Commit. This unblocks the executor.
+
+### Task B2 — ZoneManager (pure logic, TDD)
+
+**Files:**
+- Create: `src/main/java/com/example/coppergolem/zone/Zone.java`
+- Create: `src/main/java/com/example/coppergolem/zone/ZoneManager.java`
+- Test: `src/test/java/com/example/coppergolem/zone/ZoneManagerTest.java`
+
+**Interfaces:**
+- `record Zone(String name, int minX, int minZ, int maxX, int maxZ)` — full
+  vertical column (bedrock→sky); only X/Z bound.
+- `ZoneManager`:
+  - `void addZone(Zone z)`, `boolean removeZone(String name)`,
+    `boolean renameZone(String old, String neu)`,
+    `void updateZone(String name, int minX,int minZ,int maxX,int maxZ)`,
+    `List<Zone> zones()`.
+  - `boolean isProtected(int x, int z)` — true if (x,z) is inside any zone
+    (inclusive bounds; normalize min/max so corner order doesn't matter).
+  - `void writeNbt(...)` / `static ZoneManager readNbt(...)` for persistence
+    (server saved data). Keep NBT methods thin; the protection math is what the
+    test covers.
+
+- [ ] **Step 1: Failing test**
+
+```java
+package com.example.coppergolem.zone;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class ZoneManagerTest {
+    @Test
+    void protectsInsideRectangleRegardlessOfCornerOrder() {
+        ZoneManager zm = new ZoneManager();
+        zm.addZone(new Zone("base", 100, 200, 90, 190)); // min/max swapped on purpose
+        assertTrue(zm.isProtected(95, 195));   // inside
+        assertTrue(zm.isProtected(100, 200));  // on corner
+        assertFalse(zm.isProtected(101, 195)); // x outside (max is 100)
+        assertFalse(zm.isProtected(95, 201));  // z outside
+
+        assertTrue(zm.renameZone("base", "house"));
+        assertEquals("house", zm.zones().get(0).name());
+        assertTrue(zm.removeZone("house"));
+        assertFalse(zm.isProtected(95, 195));  // gone
+    }
+}
+```
+
+- [ ] **Step 2:** Run → FAIL. **Step 3:** Implement (normalize corners with
+  `Math.min/max`; `isProtected` loops zones). **Step 4:** Run → PASS.
+  **Step 5:** Commit `feat: zone manager with rectangle protection`.
+
+### Task B3 — GolemInventory rework to player layout
+
+**Files:**
+- Modify: `src/main/java/com/example/coppergolem/inventory/GolemInventory.java`
+
+Expand to player layout: **hotbar 9 + main 27 + armor 4 + offhand 1 = 41 slots**.
+Keep the existing public methods working (`findPickaxeSlot`, `findAxeSlot`,
+`activeTool`, `equipFromSlot`, `activeToolNearBreaking`, `isStorageFull` — where
+"storage" now means hotbar+main = 36 slots). Add: `armorSlots()` accessor,
+`offhandSlot()`, and slot-region constants. Add a `craft2x2(...)` hook stub the
+CraftingHelper (B6) will use, or expose enough slot access for it. Build green,
+commit. (No new unit test — slot math is simple; covered indirectly by B6.)
+
+> Implementer: verify the real 26.2 container API used in the current
+> GolemInventory (`SimpleContainer`, `getItem/setItem/getContainerSize`) and keep
+> using it. Update `isStorageFull` to scan the 36 storage slots only (exclude
+> armor/offhand).
+
+### Task B4 — Ask-gate in ToolManager
+
+**Files:**
+- Modify: `src/main/java/com/example/coppergolem/entity/ToolManager.java`
+- Create: `src/main/java/com/example/coppergolem/entity/ApprovalGate.java`
+
+**Interfaces:**
+- `interface ApprovalGate { boolean request(String itemDescription); }` —
+  returns true if the owner approves taking/crafting that item. Implemented later
+  by the controller (blocks until the UI answers, or auto-true if the job is
+  pre-approved).
+- `ToolManager` takes an `ApprovalGate` and calls
+  `gate.request("craft " + id)` / `gate.request("take " + id)` **before**
+  crafting or pulling a tool/weapon/armor/torch from a chest. If denied, that
+  acquisition fails (caller surfaces a step error). Placing already-owned torches
+  needs no gate.
+
+Build green, commit `feat: ask-gate for tool/gear acquisition`.
+
+### Task B5 — AgentPlanner (Groq prompt → ordered plan)
+
+**Files:**
+- Create: `src/main/java/com/example/coppergolem/agent/PlanStep.java`
+- Create: `src/main/java/com/example/coppergolem/agent/AgentPlanner.java`
+- Test: `src/test/java/com/example/coppergolem/agent/PlanStepParseTest.java`
+
+**Interfaces:**
+- `record PlanStep(String kind, java.util.Map<String,String> args,
+  String label)` — `kind` ∈ {`sort`,`mine`,`chop`,`deposit`,`acquire_tool`,
+  `craft`,`torch`} (this version's vocabulary); `label` is the human line shown
+  in the colored UI; `args` carry coords/sizes/filters.
+- `AgentPlanner(GroqClient ai)`:
+  - `List<PlanStep> plan(String prompt, String worldContext)` — one Groq call.
+    System prompt instructs strict JSON `{"plan":[{"kind","args","label"}...]}`,
+    resource-aware (account for tool durability/spares and inventory space in the
+    step args/labels). Parsing is pure and unit-tested with a sample JSON; the
+    network call is manual-only.
+  - `static List<PlanStep> parse(String json)` — pure, tested.
+
+- [ ] **Step 1: Failing test** for `parse` with a sample
+  `{"plan":[{"kind":"mine","args":{"w":"3","h":"3","length":"16","dir":"north"},
+  "label":"Mine 3x3 tunnel north"},{"kind":"deposit","args":{},"label":"Deposit cobble"}]}`
+  → assert 2 steps, kinds/labels correct, malformed → empty list.
+- [ ] Steps 2-5: fail → implement (Gson) → pass → commit
+  `feat: agent planner with plan-step parsing`.
+
+### Task B6 — CraftingHelper (2×2 + table find/place/3×3)
+
+**Files:**
+- Create: `src/main/java/com/example/coppergolem/craft/CraftingHelper.java`
+- Create: `src/main/java/com/example/coppergolem/craft/Recipes.java`
+
+**Interfaces:**
+- `Recipes` — minimal recipe table this version needs: planks←log, stick←planks,
+  torch←coal+stick, crafting_table←planks, wooden_pickaxe/axe←planks+stick,
+  stone_pickaxe/axe←cobble+stick. Each recipe: inputs (item id→count), output,
+  and whether it needs a 3×3 table.
+- `CraftingHelper(GolemPrimitives g, ApprovalGate gate)`:
+  - `boolean craft(String outputId, int count)` — checks recipe; gathers inputs
+    from inventory; if recipe needs a table, find one nearby (`g.findChests`-style
+    scan for a crafting_table block, or place own after crafting one); asks the
+    gate where required; produces the output into inventory. Returns success.
+  - `boolean canCraft(String outputId)`.
+
+Build green, commit. (MC-coupled; correctness verified at integration. Keep the
+recipe data in `Recipes` so it is independently reviewable.)
+
+### Task B7 — Auto-torch + zone enforcement in WorldGolemPrimitives
+
+This is the original Task 13 (`GolemController` + `WorldGolemPrimitives`),
+extended. It implements `GolemPrimitives` for the **Plan A vanilla copper
+golem** and must:
+- Implement every interface method against real 26.2 Mojmap server APIs
+  (`ServerLevel`, `level.destroyBlock`, `level.getBlockState(pos).getBlock()`,
+  `BuiltInRegistries`, entity navigation via the copper golem's `PathNavigation`,
+  chest `Container` access).
+- Implement `getBlockId(BlockPos)` (added in Task 5b) via
+  `BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock())`.
+- **Zone enforcement:** `mineBlock`/`placeBlock` consult an injected
+  `ZoneManager`; if `isProtected(x,z)` they refuse and signal failure (so the
+  step errors per §1). `pullFromChest`/`pushToChest` (sort/give) are allowed in
+  zones.
+- **Auto-torch:** during mining, every N blocks / when light is low and the
+  golem holds torches, place a torch (no gate for placing owned torches).
+- `findTreeBases(radius)`, `hasCraftMaterials`, `craftTool` (delegate to
+  CraftingHelper), `equipTool`.
+
+**Files:**
+- Create: `entity/GolemController.java`, `entity/WorldGolemPrimitives.java`
+- Modify: register the Fabric `AttachmentType` for inventory + zones + home point.
+
+`GolemController` holds: owner UUID, `GolemInventory`, `ZoneManager`,
+`AgentPlanner`, `PlanExecutor` (B8), `ApprovalGate` impl (bridges to UI),
+home-point, current plan. `tick(ServerLevel)` drives the executor. Build green,
+commit.
+
+### Task B8 — PlanExecutor (runs steps, autonomy, error-stop, colored state)
+
+**Files:**
+- Create: `src/main/java/com/example/coppergolem/agent/PlanExecutor.java`
+
+**Interfaces:**
+- `enum StepState { PENDING, RUNNING, DONE, FAILED }` (→ UI grey/blue/green/red;
+  PENDING shown grey, RUNNING blue, DONE green, FAILED red).
+- `PlanExecutor(List<PlanStep> plan, GolemPrimitives g, GroqClient ai,
+  ZoneManager zones, ToolManager tools, CraftingHelper crafts)`:
+  - `void tick(GolemPrimitives g)` — runs the current step's macro (maps
+    `kind`→ SortTask/MineTask/ChopTask/deposit/acquire/craft/torch); advances on
+    completion; marks states. Built-in autonomy: inventory full → insert a
+    deposit detour → resume; tool worn → ToolManager replace → resume.
+  - On step failure: set FAILED, **stop**, expose `errorInfo()`. Owner choice
+    (from UI): `resumeWithInstruction(String)`, `stop()`, or `doItYourself()` →
+    calls `ai` to re-plan from the failed point (one call) and splices the new
+    steps in.
+  - `List<StepStateView> view()` — `{label, state}` per step for the UI.
+
+Build green, commit `feat: plan executor with autonomy and error handling`.
+
+### Task B9 — Health, death, home-point respawn
+
+**Files:**
+- Create: `src/main/java/com/example/coppergolem/entity/GolemLife.java`
+- Modify: `GolemController` to own a `GolemLife`.
+
+The Plan A entity is a vanilla copper golem (already has health). Set its max
+health to **20 (10 hearts)** on spawn. On death: cancel/keep inventory in the
+attachment (do NOT drop), and respawn a fresh bound copper golem at the
+configured **home point** (config/UI field; default near `-5616, ~, 3872`),
+re-attaching the kept inventory + zones + owner. Build green, commit.
+
+> Implementer: verify how to set max health and detect death on the vanilla
+> copper golem in 26.2 (attributes + a death event/`ServerLivingEntityEvents`).
+> Keep the kept-inventory in the attachment so respawn restores it.
+
+### Task B10 — Networking (packets) for agent model
+
+Extends the original Task 14. Packets (Fabric `CustomPayload` + codecs):
+- C2S: `PromptC2S(String text, boolean preApprove)`, `StopC2S()`,
+  `ApprovalReplyC2S(boolean approve)`, `ErrorChoiceC2S(String choice, String instruction)`,
+  `ZoneEditC2S(String op, String name, int minX,int minZ,int maxX,int maxZ)`,
+  `SetHomeC2S(int x,int y,int z)`.
+- S2C: `PlanViewS2C(List<{label,state}>)`, `AskGateS2C(String itemDescription)`,
+  `StatusS2C(String status, int activeKeys, int coolingKeys)`,
+  `ZoneListS2C(List<Zone>)`.
+All C2S handlers verify owner UUID. Build green, commit.
+
+### Task B11 — Wire init (config, tick, spawn command)
+
+Extends the original Task 15. On server start: load `GolemConfig` (now also
+home-point + zones from saved data), build `KeyPool`+`GroqClient`+`AgentPlanner`,
+register `/golem spawn` (Plan A: spawn vanilla copper golem, bind owner, set 20
+HP), server-tick → `controller.tick`, register `ServerNetworking`. Build green,
+commit.
+
+### Task B12 — Client UI (colored plan, ask-gate, zones, inventory)
+
+Extends the original Task 16. Owner-only client:
+- Keybind opens `GolemControlScreen`: prompt box + **pre-approve checkbox** +
+  Send; **colored plan checklist** (grey/blue/green/red from `PlanViewS2C`);
+  Stop; on FAILED show three buttons (tell-it [text field] / stop / do-it-
+  yourself).
+- **Ask-gate modal:** on `AskGateS2C`, show item + Approve/Deny → `ApprovalReplyC2S`.
+- **Zone manager screen:** list zones, add/edit/rename/delete (corner coords) →
+  `ZoneEditC2S`; set home point.
+- **Inventory screen:** full player-style layout (hotbar/main/armor/offhand),
+  server-authoritative handler.
+Build + `runClient` (deferred until JDK 25). Commit.
+
+### Task B13 — End-to-end (needs JDK 25)
+
+Same as original Task 17 plus: verify a protected zone blocks mining but allows
+sorting; verify the ask-gate pauses and resumes; verify colored plan states;
+verify death→home respawn keeps inventory; verify friends (vanilla) see the
+golem and cannot control it.
+
+---
+
+## Self-Review (Addendum B)
+
+- **Scope coverage:** sort (built+B1), mine (built), chop (built), zones (B2,B7),
+  player inventory (B3), ask-gate (B4), planner (B5), crafting 2×2+table (B6),
+  auto-torch (B7), executor+autonomy+error-choices (B8), health/death/home (B9),
+  networking (B10), wiring (B11), colored-plan + zone + ask + inventory UI (B12).
+- **Reused, not rebuilt:** KeyPool, GroqClient, GolemConfig, ToolManager (gains
+  gate in B4), SortPlanner, Sort/Mine/Chop tasks, GolemPrimitives, TaskHandler.
+- **Deferred (later version):** combat, follow/come, build/place & give as
+  standalone, standing-orders. Not in any B-task.
+- **JDK 25 gate:** all B-tasks compile on JDK 24; B13 (and `runClient` in B12)
+  require JDK 25 to actually launch — deferred, owner installs when ready.
