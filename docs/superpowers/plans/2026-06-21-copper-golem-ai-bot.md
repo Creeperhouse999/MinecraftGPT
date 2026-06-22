@@ -1818,3 +1818,104 @@ golem and cannot control it.
   standalone, standing-orders. Not in any B-task.
 - **JDK 25 gate:** all B-tasks compile on JDK 24; B13 (and `runClient` in B12)
   require JDK 25 to actually launch — deferred, owner installs when ready.
+
+---
+
+## ADDENDUM C — Ore Mining
+
+Adds ore mining per the spec's "Design Addition — Ore Mining". Slots after B12,
+before the JDK-25 end-to-end test.
+
+### Task C1 — Ores data table + pickaxe-tier logic (pure, TDD)
+
+**Files:**
+- Create: `src/main/java/com/example/coppergolem/mine/Ores.java`
+- Test: `src/test/java/com/example/coppergolem/mine/OresTest.java`
+
+**Interfaces:**
+- `enum Tier { WOOD, STONE, IRON, DIAMOND, NETHERITE }` (ordinal = ordering).
+- `record OreInfo(String blockId, Tier minTier, int defaultY)`.
+- `Ores`:
+  - `static Optional<OreInfo> byName(String name)` — accepts "diamond",
+    "diamond_ore", "minecraft:diamond_ore" → the entry.
+  - `static boolean isOre(String blockId)` — true for any known ore block id
+    (incidental pickup check).
+  - `static Tier tierOf(String pickaxeId)` — "wooden_pickaxe"→WOOD,
+    "stone_pickaxe"→STONE, "iron_pickaxe"→IRON, "diamond_pickaxe"→DIAMOND,
+    "netherite_pickaxe"→NETHERITE; unknown→WOOD.
+  - `static boolean canMine(String oreBlockId, String pickaxeId)` —
+    `tierOf(pick).ordinal() >= minTier.ordinal()`.
+  - Table (vanilla rules): coal_ore=WOOD y≈50; copper_ore=STONE y≈48;
+    iron_ore=STONE y≈16; lapis_ore=STONE y≈0; redstone_ore=IRON y≈-58;
+    gold_ore=IRON y≈-16; diamond_ore=IRON y≈-58; emerald_ore=IRON y≈230
+    (mountains); deepslate_* variants map to the same info. (Y values are
+    planning hints, not hard rules.)
+
+- [ ] **Step 1: Failing test**
+
+```java
+package com.example.coppergolem.mine;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class OresTest {
+    @Test
+    void tierGatingAndLookup() {
+        assertTrue(Ores.byName("diamond").isPresent());
+        assertEquals(Ores.Tier.IRON, Ores.byName("diamond_ore").orElseThrow().minTier());
+        assertTrue(Ores.isOre("minecraft:coal_ore"));
+        assertTrue(Ores.isOre("minecraft:deepslate_diamond_ore"));
+        assertFalse(Ores.isOre("minecraft:stone"));
+        // diamond needs iron+; stone pick can't, iron pick can
+        assertFalse(Ores.canMine("minecraft:diamond_ore", "stone_pickaxe"));
+        assertTrue(Ores.canMine("minecraft:diamond_ore", "iron_pickaxe"));
+        assertTrue(Ores.canMine("minecraft:coal_ore", "wooden_pickaxe"));
+    }
+}
+```
+
+- [ ] **Steps 2-5:** fail → implement (pure Java, no MC) → pass → commit
+  `feat: ore data table with pickaxe-tier gating`.
+
+### Task C2 — MineTask incidental ore collection + OreHuntTask
+
+**Files:**
+- Modify: `src/main/java/com/example/coppergolem/task/MineTask.java`
+- Create: `src/main/java/com/example/coppergolem/task/OreHuntTask.java`
+
+- **MineTask:** after exposing/mining a cell, also check the 6 neighbors via
+  `g.getBlockId(pos)`; if `Ores.isOre(id)` and `Ores.canMine(id, activePickId)`
+  and not in a protected zone, mine it too (collect). Skip ores the current
+  pickaxe can't drop (don't waste them) — leave them.
+- **OreHuntTask** implements `TaskHandler`: ctor
+  `OreHuntTask(String ore, int count, ToolManager tools, GolemPrimitives g)`.
+  - Ensure the right pickaxe tier first: from `Ores.byName(ore).minTier()`,
+    require a pickaxe of that tier; call a ToolManager method to acquire it
+    (find/craft, ask-gate). If unobtainable → fail "need <tier> pickaxe".
+  - Then strip-mine at the ore's `defaultY` (move to that Y, dig branching
+    tunnels), collecting the target ore (and incidental ores it can mine) until
+    `count` reached or a step/length cap is hit. Zone-aware.
+  - `status()` shows "Ore hunt <ore>: N/count".
+
+Build green (MC-coupled, no unit test for the task). Commit
+`feat: incidental ore mining and targeted ore-hunt task`.
+
+### Task C3 — ToolManager/CraftingHelper iron+ tiers + planner/executor wiring
+
+**Files:**
+- Modify: `entity/ToolManager.java`, `craft/Recipes.java`, `craft/CraftingHelper.java`,
+  `agent/AgentPlanner.java` (system prompt), `agent/PlanExecutor.java`
+
+- `Recipes`: add iron_pickaxe←iron_ingot+stick, diamond_pickaxe←diamond+stick
+  (consume existing ingots/diamonds; needsTable=true). **No smelting.**
+- `ToolManager`: add a method to ensure a pickaxe of at least a given `Tier`
+  (find in chests, else craft if materials present, ask-gate), used by
+  OreHuntTask. If it can't reach the tier, return false.
+- `AgentPlanner` system prompt: add the `ore_hunt` step kind
+  (`{"kind":"ore_hunt","args":{"ore":"diamond","count":"30"}}`) and mention the
+  golem mines ores incidentally.
+- `PlanExecutor`: map `ore_hunt` → `new OreHuntTask(args.ore, parseInt(count),
+  tools, primitives)`.
+
+Build green. Commit `feat: iron+ tool tiers and ore-hunt planner/executor wiring`.
