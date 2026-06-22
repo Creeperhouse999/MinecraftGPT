@@ -3,6 +3,8 @@
 **Date:** 2026-06-21
 **Status:** Approved design, ready for implementation plan
 
+> **⚠️ AUTHORITATIVE DESIGN: see [Design Revision — Agent Model](#design-revision--agent-model) at the bottom.** The sections above describe the original single-task design (sort/mine/chop dispatch). The revision supersedes the command model, inventory, AI role, and adds protected zones, health/death, the ask-gate, crafting, and the colored-plan UI. Where they conflict, the revision governs. The provider is **Groq**, not Gemini (ignore "Gemini" above).
+
 ## Summary
 
 A Fabric mod for Minecraft 26.2 ("Chaos Cubed") that turns a vanilla Copper
@@ -277,3 +279,156 @@ config/golem.json                  (gitignored, server-side)
 5. **Gemini free-tier daily cap** even with 10 keys — pool extends, not removes,
    the limit; block-at-limit behavior covers it.
 ```
+---
+
+# Design Revision — Agent Model
+
+This revision is the authoritative design. It changes the command model from
+"AI parses one fixed task" to "AI plans a whole job as ordered steps the golem
+executes autonomously", and adds protected zones, player-style inventory,
+health/death, an ask-gate for gear, in-world crafting, auto-torching, and a
+colored live-plan UI. Provider is **Groq** (`llama-3.3-70b-versatile`).
+
+## Scope (this version)
+
+In scope: **sort chests, mine materials, chop trees, protected safe zones,
+the control UI**. Deferred to a later version: combat (attack/defend),
+follow/come, building/placing as standalone, giving items as standalone,
+continuous standing-orders.
+
+## 1. Command Model — Plan-Ahead Agent
+
+- Owner types a free-form prompt ("mine 2000 cobble", "sort my chests", "chop
+  the trees near me"). One Groq call returns a **whole-job plan**, not a single
+  task.
+- The plan is an **ordered list of steps**; the AI decides the granularity
+  (sensible high-level steps, e.g. "Craft 5 pickaxes", "Mine 2000 cobble",
+  "Deposit in chest"). Each step maps to a built-in macro/primitive.
+- The plan is **resource-aware**: the AI accounts for tool durability and how
+  many spares to carry (e.g. ~500 cobble per iron pickaxe → 5 picks for 2000),
+  reserves inventory slots for those spares, and plans return-trips to deposit
+  when the inventory fills. Numbers are planned, not random.
+- **Execution is deterministic mod logic** — no per-step AI calls (free-tier
+  safe). Built-in autonomy handles known interruptions: inventory full → deposit
+  to a matching chest → resume; tool worn out → equip/craft a spare → resume.
+
+### Primitives the planner composes (this version)
+
+`mine-area` (NxN, pickaxe), `chop-trees` (axe), `sort-chests` (Groq grouping,
+majority-home), plus the support behaviors below (craft, deposit, torch,
+acquire-tool). Targeting accepts explicit coords in the prompt
+("at 100 64 -200") or relative phrasing ("here", "in front"); the mod resolves
+relative targets from the golem/owner position.
+
+### Errors
+
+On any step failure (path blocked, no tool, protected zone, missing table) the
+golem **stops** and surfaces the failed step + reason. The owner chooses:
+**tell it what to do** / **stop** / **"do it yourself"** → the latter sends the
+error + situation back to Groq for a re-plan around the obstacle (one extra
+call, only on owner request), then resumes autonomously.
+
+## 2. Inventory — Player Layout
+
+The golem's inventory mirrors a player's: **hotbar (9) + main (27) + armor (4) +
+offhand (1)**. The owner can open it any time (even mid-job) and manually
+add/remove items. Stored server-side via Fabric attachment keyed by the golem's
+UUID; kept across death (see §5).
+
+## 3. Gear Acquisition — Two Paths + Ask-Gate
+
+Applies uniformly to **tools, weapons, armor, and materials/torches**:
+
+- **"I'll give you X"** → the owner hand-places it in the golem inventory via UI.
+- **"Get yourself X"** → the golem finds it in nearby chests, or crafts it.
+- **Ask-gate:** before **crafting OR taking** a tool/weapon/armor (and before
+  crafting/taking torches), the golem **pauses and asks** the owner
+  ("I want to take/craft <item> — ok?"), showing the item. The golem idles until
+  answered.
+- **Pre-approve per job:** a checkbox at job start ("allow tools/armor/crafting
+  for this job") suppresses the per-item asks for that job. Unchecked → it asks
+  each time.
+- The golem keeps a **safety reserve of spare tools** (and a stack of torches)
+  sized to the planned job.
+
+## 4. Crafting
+
+- **2×2 in-inventory crafting** for small items with no table: sticks, torches,
+  planks, wooden tools.
+- **3×3 crafting needs a crafting table.** The golem first **searches** for a
+  table nearby (placed or in chests); if none, it **crafts and places its own**
+  table (asking per the gate), uses it, then picks it back up.
+
+## 5. Health, Death & Home Point
+
+- Golem has **20 HP (10 hearts)**, like a player, and **can die**.
+- A configurable **home point** (UI/config; near the village around
+  `-5616 ~ 3872`, exact coords TBD by owner). On death the golem **respawns at
+  the home point**.
+- **Inventory is kept** across death (it is a robot — nothing drops).
+
+## 6. Auto-Torching Underground
+
+- The golem carries a **safety stack of torches** for underground jobs (acquired
+  per the ask-gate; placing existing torches needs no ask).
+- During mining/underground work it **automatically places torches** for light
+  at sensible spacing.
+
+## 7. Protected Safe Zones (Anti-Grief)
+
+The core protection against the golem wrecking player builds (which are made of
+the same blocks it mines).
+
+- Zones are **defined in the UI** by entering corner coordinates → a **rectangle
+  (X/Z)**. No physical marker block.
+- Each zone spans **bedrock to sky** (full vertical column of the rectangle).
+- Each zone has a **name** ("base", "house"); the owner can **rename, edit
+  coordinates, and delete** zones. Multiple zones allowed.
+- **Inside any zone the golem may ONLY sort chests and give/fetch items**
+  (non-destructive). It must **never mine, place, build, or otherwise alter
+  blocks** inside a zone. Mining/placing primitives consult the zone manager and
+  refuse positions inside any zone (treated as a step error → §1 error flow).
+- This lets the owner wrap their base once and mine the same block types freely
+  elsewhere.
+
+## 8. Control UI (owner client only)
+
+- Keybind opens the panel. **Prompt box** to type the job; **per-job
+  pre-approve** checkbox.
+- **Colored live plan:** the AI's plan rendered as a checklist —
+  🟢 green = done, 🔵 blue = currently doing, 🔴 red = failed (with the error).
+  Steps tick through live.
+- **Ask-gate prompt:** when the golem asks to take/craft gear, the UI shows the
+  request with approve/deny.
+- **Stop / error choices:** stop the job; on error choose tell-it / stop /
+  do-it-yourself.
+- **Zone manager:** add/edit/rename/delete named protected zones (corner coords).
+- **Inventory view:** the golem's full player-style inventory (hotbar/main/armor/
+  offhand), drag items in/out.
+
+## 9. Unchanged from the original design
+
+Plan A vanilla Copper Golem (friends install nothing), owner-UUID enforcement,
+Groq key pool with block-at-limit, server-side persistence, runs while owner is
+offline.
+
+## Reconciliation with already-built code
+
+Already built and **kept**: KeyPool, GroqClient, GolemConfig, ToolManager
+(find/craft/durability/spares + stone-only gather), SortPlanner, SortTask,
+MineTask, ChopTask, GolemPrimitives (interface), TaskHandler, GolemInventory.
+
+**Changes required by this revision:**
+- `GolemInventory`: expand from 27+4 to full player layout (hotbar 9 + main 27 +
+  armor 4 + offhand 1); add 2×2 craft support hooks.
+- AI role: add an `AgentPlanner` (prompt → ordered plan via Groq) and a
+  `PlanExecutor` (runs steps, built-in autonomy, error-stop). `TaskParser`
+  becomes plan parsing. The single-task `TaskDispatcher` is folded into the
+  executor (each step still backed by SortTask/MineTask/ChopTask macros).
+- New components: `ZoneManager` (named zones, `isProtected(BlockPos)`, enforced
+  in mine/place primitives), `CraftingHelper` (2×2 + table find/place/3×3),
+  `GolemHealth`/home-point + respawn, ask-gate state in the controller, the
+  colored-plan + zone-manager + ask-prompt UI.
+- Permission flow: `ToolManager` gains an **ask-gate** hook (request → await
+  owner approval) instead of fully-automatic craft/take, with per-job
+  pre-approval bypass.
