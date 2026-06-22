@@ -186,4 +186,65 @@ public final class GolemController {
     public void setHomePoint(net.minecraft.core.BlockPos pos) {
         life.setHomePoint(pos);
     }
+
+    // -------------------------------------------------------------------------
+    // Networking stubs (wired by B10 ServerNetworking; implemented in B11/B12)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Start a new job from a freeform natural-language prompt.
+     *
+     * <p>TODO(B11): pass {@code text} to {@link com.example.coppergolem.agent.AgentPlanner}
+     * to produce a {@link com.example.coppergolem.agent.PlanExecutor} and assign it.
+     * {@code preApprove} bypasses the first approval gate when true.</p>
+     */
+    public void startFromPrompt(String text, boolean preApprove) {
+        // TODO(B11): wire AgentPlanner → PlanExecutor → assign(executor)
+        com.example.coppergolem.CopperGolemMod.LOG.info(
+                "[coppergolem] startFromPrompt text={} preApprove={}", text, preApprove);
+    }
+
+    /**
+     * Deliver an owner approval-gate reply to the running task.
+     *
+     * <p>TODO(B12): route {@code approve} into the live {@link ApprovalGate}
+     * future/latch so the waiting task unblocks.</p>
+     */
+    public void receiveApproval(boolean approve) {
+        // TODO(B12): unblock ApprovalGate latch
+        com.example.coppergolem.CopperGolemMod.LOG.info(
+                "[coppergolem] receiveApproval approve={}", approve);
+    }
+
+    /**
+     * Deliver an error-recovery choice to the running task.
+     *
+     * <p>TODO(B11/B12): route into PlanExecutor error handler.</p>
+     *
+     * @param choice      short key ("retry", "skip", "abort", "custom")
+     * @param instruction freeform instruction when choice is "custom"
+     */
+    public void receiveErrorChoice(String choice, String instruction) {
+        // TODO(B11/B12): route into PlanExecutor error handler
+        com.example.coppergolem.CopperGolemMod.LOG.info(
+                "[coppergolem] receiveErrorChoice choice={} instruction={}", choice, instruction);
+    }
+
+    /**
+     * Apply a zone-edit operation from the client.
+     *
+     * @param op   "add", "remove", or "update"
+     * @param name zone name
+     */
+    public void handleZoneEdit(String op, String name,
+                                int minX, int minZ, int maxX, int maxZ) {
+        switch (op) {
+            case "add"    -> zones.addZone(
+                    new com.example.coppergolem.zone.Zone(name, minX, minZ, maxX, maxZ));
+            case "remove" -> zones.removeZone(name);
+            case "update" -> zones.updateZone(name, minX, minZ, maxX, maxZ);
+            default -> com.example.coppergolem.CopperGolemMod.LOG.warn(
+                    "[coppergolem] unknown zone op: {}", op);
+        }
+    }
 }
