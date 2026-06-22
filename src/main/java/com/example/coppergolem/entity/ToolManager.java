@@ -37,9 +37,11 @@ public class ToolManager {
     );
 
     private final GolemPrimitives g;
+    private final ApprovalGate gate;
 
-    public ToolManager(GolemPrimitives g) {
+    public ToolManager(GolemPrimitives g, ApprovalGate gate) {
         this.g = g;
+        this.gate = gate;
     }
 
     // -------------------------------------------------------------------------
@@ -64,12 +66,12 @@ public class ToolManager {
 
         // Step 3 — craft from existing materials
         String toolId = idFor(kind);
-        if (g.hasCraftMaterials(toolId) && g.craftTool(toolId)) {
+        if (g.hasCraftMaterials(toolId) && gate.request("craft " + toolId) && g.craftTool(toolId)) {
             return equipFromInventory(kind);
         }
 
         // Step 4 — gather materials then craft
-        if (gatherMaterials(kind) && g.hasCraftMaterials(toolId) && g.craftTool(toolId)) {
+        if (gatherMaterials(kind) && g.hasCraftMaterials(toolId) && gate.request("craft " + toolId) && g.craftTool(toolId)) {
             return equipFromInventory(kind);
         }
 
@@ -110,7 +112,7 @@ public class ToolManager {
                 // Attempt a single gather pass for one more spare
                 gatherMaterials(kind);
             }
-            if (g.hasCraftMaterials(toolId) && g.craftTool(toolId)) {
+            if (g.hasCraftMaterials(toolId) && gate.request("craft " + toolId) && g.craftTool(toolId)) {
                 // Freshly crafted tool lands in inventory; push it to storage.
                 // We locate it via inventory search and push the item type.
                 int slot = findToolSlot(kind);
@@ -166,6 +168,9 @@ public class ToolManager {
                 // Match by item registry name suffix (e.g. "wooden_pickaxe")
                 String itemName = entry.getKey().getDescriptionId();
                 if (itemName.endsWith(toolId)) {
+                    if (!gate.request("take " + toolId)) {
+                        return false; // owner denied taking this tool
+                    }
                     int pulled = g.pullFromChest(chest, entry.getKey(), 1);
                     if (pulled > 0) {
                         return equipFromInventory(kind);
