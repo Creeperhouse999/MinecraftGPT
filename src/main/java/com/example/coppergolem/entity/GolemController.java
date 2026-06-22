@@ -36,6 +36,9 @@ public final class GolemController {
     private final ToolManager toolManager;
     private final CraftingHelper crafts;
 
+    /** Manages health (20 HP), home point, and death-respawn logic. */
+    private final GolemLife life;
+
     /** The task currently being driven; null when idle. */
     private TaskHandler current;
     private boolean paused;
@@ -60,6 +63,10 @@ public final class GolemController {
         this.crafts = new CraftingHelper(this.primitives, this.gate);
         this.primitives.setCraftingHelper(this.crafts);
         this.toolManager = new ToolManager(this.primitives, this.gate);
+
+        // Initialise life — sets max health to 20 (10 hearts) on spawn.
+        this.life = new GolemLife();
+        this.life.initHealth(golem);
     }
 
     // -------------------------------------------------------------------------
@@ -155,5 +162,28 @@ public final class GolemController {
 
     public ApprovalGate gate() {
         return gate;
+    }
+
+    /** Returns the {@link GolemLife} that owns health and home-point logic. */
+    public GolemLife life() {
+        return life;
+    }
+
+    /**
+     * Returns the home point the golem respawns at on death.
+     * Delegates to {@link GolemLife#getHomePoint()}.
+     */
+    public net.minecraft.core.BlockPos homePoint() {
+        return life.getHomePoint();
+    }
+
+    /**
+     * Sets the home point the golem respawns at on death.
+     * Delegates to {@link GolemLife#setHomePoint(net.minecraft.core.BlockPos)}.
+     *
+     * @param pos the new respawn position
+     */
+    public void setHomePoint(net.minecraft.core.BlockPos pos) {
+        life.setHomePoint(pos);
     }
 }
