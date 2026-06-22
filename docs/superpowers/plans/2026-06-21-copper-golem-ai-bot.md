@@ -1919,3 +1919,44 @@ Build green (MC-coupled, no unit test for the task). Commit
   tools, primitives)`.
 
 Build green. Commit `feat: iron+ tool tiers and ore-hunt planner/executor wiring`.
+
+---
+
+## ADDENDUM D — Hand Visual + Item-Frame Chest Labels
+
+### Task D1 — Hand-visual for tools (fix B7 equipTool)
+
+**Files:** Modify `entity/WorldGolemPrimitives.java` (+ `ToolManager` equip path).
+
+Make `equipTool(ItemStack)` ALSO set the copper golem's main-hand item so
+unmodded clients render it: `golem.setItemInHand(InteractionHand.MAIN_HAND,
+stack)` (VERIFY real 26.2 names — `setItemInHand`, `InteractionHand.MAIN_HAND`,
+or `setItemSlot(EquipmentSlot.MAINHAND, stack)`). Call it whenever the active
+tool changes (ToolManager equip, MineTask pickaxe, ChopTask axe). When a job ends
+/ tool stored, optionally clear the hand. Build green, commit
+`feat: golem visibly holds its active tool (main-hand item)`.
+
+> Caveat: the 26.2 copper golem render may not show a held item; set the data
+> regardless — visual verified at the JDK-25 in-game test (B13). If it does not
+> render, that's a vanilla-model limitation, not a code bug.
+
+### Task D2 — Item-frame chest labels in SortTask
+
+**Files:** Modify `task/SortTask.java` (SCAN + Groq payload).
+
+During SCAN, for each chest read item frames on its faces: scan `ItemFrame`
+entities (`net.minecraft.world.entity.decoration.ItemFrame`) whose position is on
+/ adjacent to the chest block; if one holds an item, record
+`chestId → framedItemId` (`frame.getItem()` → the ItemStack → registry id).
+VERIFY the real 26.2 ItemFrame API (`getItem()`, position/facing) in sources.
+
+Include the frame labels in the Groq grouping payload (add a `"frame"` field per
+chest in the snapshot JSON). Update the system prompt: a framed chest is the home
+for the **whole category** of its framed item (resolve the framed item's group,
+assign that group's home to this chest, overriding majority). Unframed chests use
+majority as before.
+
+Pass the resulting group→home assignment through `SortPlanner` (it already takes
+`itemToGroup`; ensure the frame-derived home wins — you may post-process the
+planner output or feed the home assignment in). Build green, commit
+`feat: item-frame chest labels override sort majority by category`.
