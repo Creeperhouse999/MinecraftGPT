@@ -74,7 +74,7 @@ public class CopperGolemMod implements ModInitializer {
         // GolemLife keys by ENTITY uuid; hand it the registry's entity-index view.
         GolemLife.register(GolemRegistry.INSTANCE.byEntityView());
 
-        // ---- Server tick: advance every controller ----------------------------
+        // ---- Server tick: advance every controller + push UI state -----------
         // ServerTickEvents.END_SERVER_TICK.register(server -> ...) verified
         // (EndTick.onEndTick(MinecraftServer)).
         ServerTickEvents.END_SERVER_TICK.register(server -> {
@@ -83,6 +83,19 @@ public class CopperGolemMod implements ModInitializer {
             for (GolemController controller : GolemRegistry.INSTANCE.all()) {
                 ServerLevel level = (ServerLevel) controller.golem().level();
                 controller.tick(level);
+
+                // Push plan view + status to owner player each tick so the
+                // client UI stays in sync without the player having to open
+                // the screen first.
+                ServerPlayer owner = server.getPlayerList().getPlayer(controller.owner());
+                if (owner != null) {
+                    java.util.List<com.example.coppergolem.net.Packets.StepLine> steps =
+                            controller.planView();
+                    if (!steps.isEmpty()) {
+                        ServerNetworking.sendPlanView(owner, steps);
+                    }
+                    ServerNetworking.sendStatus(owner, controller.status(), 0, 0);
+                }
             }
         });
 
