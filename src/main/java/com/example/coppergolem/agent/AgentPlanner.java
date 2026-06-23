@@ -32,7 +32,7 @@ public final class AgentPlanner {
             "{\"plan\":[{\"kind\":\"<verb>\",\"args\":{\"key\":\"value\",...},\"label\":\"<human description>\"}...]}\n" +
             "Valid kind values ONLY: sort, mine, chop, deposit, acquire_tool, craft, torch, ore_hunt, follow, come, attack, defend, chat, bring.\n" +
             "- sort: sort nearby chests. No args needed.\n" +
-            "- mine: mine blocks. Args: material (cobblestone/dirt/stone/gravel), count (number).\n" +
+            "- mine: dig a tunnel. Args: material (cobblestone/dirt/stone/gravel), w (width, default 1), h (height, default 2), length (blocks deep, default 8), dir (north/south/east/west, default north). For '3x3' use w:3,h:3. For '1x2' use w:1,h:2.\n" +
             "- chop: chop trees. Args: count (number of trees).\n" +
             "- ore_hunt: targeted ore mining. Args: ore (coal/iron/gold/diamond/redstone/copper/emerald), count (number).\n" +
             "- deposit: dump inventory to nearest chest. No args needed.\n" +
