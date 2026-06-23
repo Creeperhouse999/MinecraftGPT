@@ -167,6 +167,7 @@ public final class OreHuntTask implements TaskHandler {
         String blockId = g.getBlockId(pos);
         boolean isTarget = Ores.isOre(blockId) && isTargetOre(blockId);
         boolean mined = g.mineBlock(pos);
+        if (!mined) return; // delay in progress — caller will retry next tick
         steps++;
 
         if (mined && isTarget) {

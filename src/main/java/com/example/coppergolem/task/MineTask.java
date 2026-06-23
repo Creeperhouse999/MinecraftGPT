@@ -84,8 +84,9 @@ public final class MineTask implements TaskHandler {
         BlockPos cell = cells.peek();
         if (!g.moveTo(cell)) return false; // still walking
 
-        boolean mined = g.mineBlock(cell); // filter handled in primitive impl
-        cells.poll();
+        boolean mined = g.mineBlock(cell); // returns false while delay in progress
+        if (!mined) return false; // still mining this block, retry next tick
+        cells.poll(); // only advance once block is actually broken
 
         if (mined) {
             // Check 6 neighbors for incidental ore collection.

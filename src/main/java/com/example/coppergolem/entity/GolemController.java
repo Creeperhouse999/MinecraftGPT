@@ -179,14 +179,11 @@ public final class GolemController {
         if (executor != null) {
             executor.tick(primitives);
             if (executor.isDone() || executor.isFailed()) {
-                // Keep the failed executor reference visible via status() for one
-                // extra tick so the UI can display it, then clear on next round.
-                // Actually clear immediately — status() already captured it above.
                 if (executor.isDone()) {
                     executor = null;
                 }
-                // isFailed: leave in place so status() surfaces "failed: ...".
-                // A new startFromPrompt will replace it. (MINOR-L compliant.)
+                // Suppress wandering immediately after task ends
+                golem.getBrain().stopAll(level, golem);
             }
             return;
         }
@@ -194,6 +191,8 @@ public final class GolemController {
         // Legacy single-task path (assign()-based) — retained for callers that
         // drive a bare TaskHandler instead of a full plan.
         if (current == null || paused) {
+            // Suppress vanilla Brain wandering every tick when idle
+            golem.getBrain().stopAll(level, golem);
             return;
         }
         boolean done = current.tick(primitives);

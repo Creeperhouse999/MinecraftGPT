@@ -325,10 +325,19 @@ public final class PlanExecutor {
             case "deposit" -> new InlineDepositHandler(g);
 
             case "acquire_tool" -> {
-                String kindStr = args.getOrDefault("kind", "pickaxe").toUpperCase();
-                ToolManager.ToolKind toolKind;
+                String kindStr = args.getOrDefault("kind", args.getOrDefault("tool", "pickaxe")).toUpperCase();
+                ToolManager.ToolKind toolKind = null;
                 try { toolKind = ToolManager.ToolKind.valueOf(kindStr); }
-                catch (IllegalArgumentException ex) { toolKind = ToolManager.ToolKind.PICKAXE; }
+                catch (IllegalArgumentException ignored) {}
+                if (toolKind == null) {
+                    final String unsupported = kindStr.toLowerCase();
+                    yield new TaskHandler() {
+                        @Override public boolean tick(GolemPrimitives g) { return true; }
+                        @Override public String status() { return "failed: can't acquire " + unsupported; }
+                        @Override public void pause() {}
+                        @Override public void resume() {}
+                    };
+                }
                 final ToolManager.ToolKind finalKind = toolKind;
                 yield new SingleShotHandler(
                     "Acquire " + kindStr.toLowerCase(),
