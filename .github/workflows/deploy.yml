@@ -1,0 +1,33 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'oracle'
+
+      - name: Build mod
+        run: ./gradlew clean build
+
+      - name: Upload to Falix via SFTP
+        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
+        with:
+          server: ${{ secrets.FALIX_HOST }}
+          port: ${{ secrets.FALIX_PORT }}
+          username: ${{ secrets.FALIX_USER }}
+          password: ${{ secrets.FALIX_PASS }}
+          local_path: build/libs/MinecraftGPT-*.jar
+          remote_path: /mods/
+          delete_remote_files: false
