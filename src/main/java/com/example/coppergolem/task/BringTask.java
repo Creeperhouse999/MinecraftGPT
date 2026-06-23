@@ -1,8 +1,12 @@
 package com.example.coppergolem.task;
 
+import com.example.coppergolem.craft.CraftingHelper;
 import com.example.coppergolem.entity.GolemPrimitives;
+import com.example.coppergolem.entity.ToolManager;
 import com.example.coppergolem.inventory.GolemInventory;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
@@ -21,24 +25,31 @@ public class BringTask implements TaskHandler {
 
     private enum Phase { FIND_CHEST, CRAFT, MINE, WALK_TO_OWNER, GIVE, FAIL, DONE }
 
-    private final String itemId;   // e.g. "minecraft:iron_ingot"
+    private final String itemId;
     private final int count;
     private final Supplier<BlockPos> ownerPos;
     private final MinecraftServer server;
     private final UUID ownerId;
+    private final CraftingHelper crafts;
+    private final ToolManager tools;
 
     private Phase phase = Phase.FIND_CHEST;
     private String statusMsg = "searching chests...";
-    private int mineTicks = 0;
     private boolean paused = false;
 
+    // Sub-task for mine phase
+    private OreHuntTask oreHunt = null;
+
     public BringTask(String itemId, int count, Supplier<BlockPos> ownerPos,
-                     MinecraftServer server, UUID ownerId) {
+                     MinecraftServer server, UUID ownerId,
+                     CraftingHelper crafts, ToolManager tools) {
         this.itemId = normalizeId(itemId);
         this.count = count;
         this.ownerPos = ownerPos;
         this.server = server;
         this.ownerId = ownerId;
+        this.crafts = crafts;
+        this.tools = tools;
     }
 
     @Override
@@ -48,81 +59,85 @@ public class BringTask implements TaskHandler {
         switch (phase) {
 
             case FIND_CHEST -> {
-                // Search nearby chests for the item
-                List<BlockPos> chests = g.findChests(32);
                 Item target = resolveItem();
                 if (target == null) {
                     phase = Phase.FAIL;
                     statusMsg = "failed: unknown item " + itemId;
                     return false;
                 }
-                boolean found = false;
+                // Already have enough?
+                if (hasItem(g, target)) {
+                    phase = Phase.WALK_TO_OWNER;
+                    statusMsg = "already have it, bringing to you...";
+                    return false;
+                }
+                List<BlockPos> chests = g.findChests(32);
                 for (BlockPos chest : chests) {
                     Map<Item, Integer> contents = g.readChest(chest);
-                    if (contents.getOrDefault(target, 0) >= count) {
-                        // Walk to chest then pull
-                        if (g.moveTo(chest)) {
-                            int pulled = g.pullFromChest(chest, target, count);
-                            if (pulled >= count) {
-                                found = true;
-                                break;
-                            }
+                    if (contents.getOrDefault(target, 0) > 0) {
+                        if (!g.moveTo(chest)) return false; // still walking
+                        int pulled = g.pullFromChest(chest, target, count);
+                        if (pulled > 0 && hasItem(g, target)) {
+                            phase = Phase.WALK_TO_OWNER;
+                            statusMsg = "found in chest, bringing to you...";
+                            return false;
                         }
-                        return false; // still walking
                     }
                 }
-                if (found) {
-                    phase = Phase.WALK_TO_OWNER;
-                    statusMsg = "found in chest, bringing to you...";
-                } else {
-                    phase = Phase.CRAFT;
-                    statusMsg = "not in chests, trying to craft...";
-                }
+                // Nothing in chests
+                phase = Phase.CRAFT;
+                statusMsg = "not in chests, trying to craft...";
             }
 
             case CRAFT -> {
                 Item target = resolveItem();
                 if (target != null && hasItem(g, target)) {
                     phase = Phase.WALK_TO_OWNER;
-                    statusMsg = "already have it, bringing to you...";
+                    statusMsg = "crafted, bringing to you...";
                     return false;
                 }
-                // Try crafting via CraftingHelper (golem primitives don't expose craft directly,
-                // so we check hasCraftMaterials then craftTool as proxy)
-                String craftId = itemId;
-                boolean crafted = g.craftTool(craftId); // works for tools; falls through for others
-                if (crafted) {
+                if (crafts != null && crafts.craft(itemId, count)) {
                     phase = Phase.WALK_TO_OWNER;
                     statusMsg = "crafted, bringing to you...";
                 } else {
                     phase = Phase.MINE;
-                    statusMsg = "can't craft, searching world...";
+                    statusMsg = "can't craft, mining/hunting...";
+                    // Build ore name from item id (e.g. "minecraft:iron_ingot" → "iron")
+                    String oreName = oreNameFromItemId(itemId);
+                    oreHunt = new OreHuntTask(oreName, count, tools, g);
                 }
             }
 
             case MINE -> {
-                // Use ore hunt approach: scan for the block near golem
                 Item target = resolveItem();
                 if (target != null && hasItem(g, target)) {
                     phase = Phase.WALK_TO_OWNER;
                     statusMsg = "got it, bringing to you...";
+                    oreHunt = null;
                     return false;
                 }
-                mineTicks++;
-                if (mineTicks > 400) { // 20s timeout
+                if (oreHunt == null) {
                     phase = Phase.FAIL;
-                    statusMsg = "failed: could not find or mine " + itemId;
+                    statusMsg = "failed: nothing to mine";
+                    return false;
                 }
-                statusMsg = "searching world for " + itemId + "...";
-                // Mine task will handle actual ore hunting; here we just wait if ore_hunt was chained
+                boolean done = oreHunt.tick(g);
+                statusMsg = "mining: " + oreHunt.status();
+                if (done) {
+                    if (target != null && hasItem(g, target)) {
+                        phase = Phase.WALK_TO_OWNER;
+                        statusMsg = "mined it, bringing to you...";
+                    } else {
+                        phase = Phase.FAIL;
+                        statusMsg = "failed: couldn't obtain " + itemId;
+                    }
+                    oreHunt = null;
+                }
             }
 
             case WALK_TO_OWNER -> {
                 BlockPos dest = ownerPos.get();
-                if (dest == null) {
-                    statusMsg = "waiting for owner...";
-                    return false;
-                }
+                if (dest == null) { statusMsg = "waiting for owner..."; return false; }
                 if (g.moveTo(dest)) {
                     phase = Phase.GIVE;
                     statusMsg = "giving items to you...";
@@ -130,10 +145,10 @@ public class BringTask implements TaskHandler {
             }
 
             case GIVE -> {
-                if (server == null) { phase = Phase.DONE; return false; }
+                if (server == null) { phase = Phase.DONE; return true; }
                 ServerPlayer player = server.getPlayerList().getPlayer(ownerId);
                 if (player == null) {
-                    statusMsg = "owner not found";
+                    statusMsg = "owner offline";
                     phase = Phase.FAIL;
                     return false;
                 }
@@ -146,9 +161,7 @@ public class BringTask implements TaskHandler {
                     if (stack.getItem() == target) {
                         int take = Math.min(stack.getCount(), count - transferred);
                         ItemStack give = stack.copyWithCount(take);
-                        // Give to player — use player inventory addItem
                         if (!player.getInventory().add(give)) {
-                            // Drop at player feet if inventory full
                             player.drop(give, false);
                         }
                         stack.shrink(take);
@@ -161,21 +174,19 @@ public class BringTask implements TaskHandler {
                 return true;
             }
 
-            case FAIL -> { return true; } // done (failed)
+            case FAIL -> { return true; }
             case DONE -> { return true; }
         }
         return false;
     }
 
-    @Override
-    public String status() { return statusMsg; }
-    @Override public void pause() { paused = true; }
-    @Override public void resume() { paused = false; }
+    @Override public String status() { return statusMsg; }
+    @Override public void pause() { paused = true; if (oreHunt != null) oreHunt.pause(); }
+    @Override public void resume() { paused = false; if (oreHunt != null) oreHunt.resume(); }
 
     private Item resolveItem() {
         try {
-            return net.minecraft.core.registries.BuiltInRegistries.ITEM
-                .getValue(net.minecraft.resources.Identifier.parse(itemId));
+            return BuiltInRegistries.ITEM.getValue(Identifier.parse(itemId));
         } catch (Exception e) {
             return null;
         }
@@ -189,6 +200,16 @@ public class BringTask implements TaskHandler {
             if (s.getItem() == target) found += s.getCount();
         }
         return found >= count;
+    }
+
+    /** Maps item id to ore name for OreHuntTask. e.g. "minecraft:iron_ingot" → "iron" */
+    private static String oreNameFromItemId(String id) {
+        String path = id.contains(":") ? id.substring(id.indexOf(':') + 1) : id;
+        // Strip common suffixes
+        for (String suffix : new String[]{"_ingot", "_ore", "_gem", "_dust", "_nugget"}) {
+            if (path.endsWith(suffix)) return path.substring(0, path.length() - suffix.length());
+        }
+        return path; // fallback: use as-is (OreHuntTask will handle unknown gracefully)
     }
 
     private static String normalizeId(String id) {

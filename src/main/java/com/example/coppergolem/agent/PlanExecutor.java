@@ -385,13 +385,15 @@ public final class PlanExecutor {
                 int bringCount = parseInt(args, "count", 1);
                 final UUID bOwnerId = this.ownerId;
                 final MinecraftServer bServer = this.server;
+                final CraftingHelper bCrafts = this.crafts;
+                final ToolManager bTools = this.tools;
                 yield new BringTask(bringItem, bringCount,
                     () -> {
                         if (bServer == null || bOwnerId == null) return null;
                         ServerPlayer p = bServer.getPlayerList().getPlayer(bOwnerId);
                         return p != null ? p.blockPosition() : null;
                     },
-                    bServer, bOwnerId);
+                    bServer, bOwnerId, bCrafts, bTools);
             }
 
             case "attack" -> new AttackTask();
