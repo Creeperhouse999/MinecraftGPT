@@ -14,6 +14,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -91,13 +92,24 @@ public class CopperGolemMod implements ModInitializer {
                 // the screen first.
                 ServerPlayer owner = server.getPlayerList().getPlayer(controller.owner());
                 if (owner != null) {
+                    // Always send plan view (even empty) so client clears stale list
                     java.util.List<com.example.coppergolem.net.Packets.StepLine> steps =
                             controller.planView();
-                    if (!steps.isEmpty()) {
-                        ServerNetworking.sendPlanView(owner, steps);
-                    }
+                    ServerNetworking.sendPlanView(owner, steps);
                     ServerNetworking.sendStatus(owner, controller.status(), 0, 0);
                 }
+            }
+        });
+
+        // ---- Despawn golem when owner disconnects --------------------------------
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            UUID disconnectedOwner = handler.player.getUUID();
+            GolemController ctrl = GolemRegistry.INSTANCE.get(disconnectedOwner);
+            if (ctrl != null) {
+                ctrl.stop();
+                ctrl.golem().discard(); // remove entity from world
+                GolemRegistry.INSTANCE.remove(disconnectedOwner);
+                LOG.info("[coppergolem] golem despawned — owner {} disconnected", disconnectedOwner);
             }
         });
 
@@ -133,6 +145,22 @@ public class CopperGolemMod implements ModInitializer {
                     ctrl.stop();
                     player.sendSystemMessage(
                             net.minecraft.network.chat.Component.literal("[golem] stopped."));
+                    return 1;
+                }))
+                .then(Commands.literal("kill").executes(ctx -> {
+                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                    GolemController ctrl = GolemRegistry.INSTANCE.get(player.getUUID());
+                    if (ctrl == null) {
+                        player.sendSystemMessage(
+                                net.minecraft.network.chat.Component.literal(
+                                        "[golem] you have no active golem."));
+                        return 0;
+                    }
+                    ctrl.stop();
+                    ctrl.golem().discard();
+                    GolemRegistry.INSTANCE.remove(player.getUUID());
+                    player.sendSystemMessage(
+                            net.minecraft.network.chat.Component.literal("[golem] golem removed."));
                     return 1;
                 }));
 

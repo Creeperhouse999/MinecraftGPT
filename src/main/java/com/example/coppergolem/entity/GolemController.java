@@ -145,6 +145,10 @@ public final class GolemController {
         // Initialise life — sets max health to 20 (10 hearts) on spawn.
         this.life = new GolemLife();
         this.life.initHealth(golem);
+
+        // Suppress vanilla wandering/idle Brain behaviors so golem stands still
+        // when no task is running. The Brain still exists but all activities cleared.
+        golem.getBrain().stopAll(level, golem);
     }
 
     // -------------------------------------------------------------------------
