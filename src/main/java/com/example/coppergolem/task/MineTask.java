@@ -2,8 +2,10 @@ package com.example.coppergolem.task;
 
 import com.example.coppergolem.entity.GolemPrimitives;
 import com.example.coppergolem.entity.ToolManager;
+import com.example.coppergolem.mine.Ores;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -82,11 +84,35 @@ public final class MineTask implements TaskHandler {
         if (!g.moveTo(cell)) return false; // still walking
 
         boolean mined = g.mineBlock(cell); // filter handled in primitive impl
-        g.pickupNearbyItems(2);
         cells.poll();
 
         if (mined) {
+            // Check 6 neighbors for incidental ore collection.
+            // Determine active pickaxe id from the golem's active tool.
+            String activePickId = "";
+            var activeTool = g.inventory().activeTool();
+            if (!activeTool.isEmpty()) {
+                var key = BuiltInRegistries.ITEM.getKey(activeTool.getItem());
+                if (key != null) {
+                    activePickId = key.toString();
+                    // Strip namespace to get plain id for Ores.tierOf
+                    if (activePickId.contains(":")) {
+                        activePickId = activePickId.substring(activePickId.indexOf(":") + 1);
+                    }
+                }
+            }
+            for (Direction face : Direction.values()) {
+                BlockPos neighbor = cell.relative(face);
+                String neighborId = g.getBlockId(neighbor);
+                if (Ores.isOre(neighborId) && Ores.canMine(neighborId, activePickId)) {
+                    // mineBlock already refuses protected zones internally
+                    g.mineBlock(neighbor);
+                }
+            }
+            g.pickupNearbyItems(2);
             toolManager.maybeReplaceBeforeBreak(ToolManager.ToolKind.PICKAXE, 5);
+        } else {
+            g.pickupNearbyItems(2);
         }
 
         return cells.isEmpty();
