@@ -1942,21 +1942,38 @@ tool changes (ToolManager equip, MineTask pickaxe, ChopTask axe). When a job end
 
 ### Task D2 — Item-frame chest labels in SortTask
 
-**Files:** Modify `task/SortTask.java` (SCAN + Groq payload).
+**Files:** Modify `task/SortTask.java` (SCAN + Groq payload + EXECUTE/pause).
 
-During SCAN, for each chest read item frames on its faces: scan `ItemFrame`
-entities (`net.minecraft.world.entity.decoration.ItemFrame`) whose position is on
-/ adjacent to the chest block; if one holds an item, record
-`chestId → framedItemId` (`frame.getItem()` → the ItemStack → registry id).
-VERIFY the real 26.2 ItemFrame API (`getItem()`, position/facing) in sources.
+**Framed-chests-only sorting (majority rule retired):** the golem may use ONLY
+chests that have an item frame. Unframed chests are ignored as destinations
+entirely.
 
-Include the frame labels in the Groq grouping payload (add a `"frame"` field per
-chest in the snapshot JSON). Update the system prompt: a framed chest is the home
-for the **whole category** of its framed item (resolve the framed item's group,
-assign that group's home to this chest, overriding majority). Unframed chests use
-majority as before.
+During SCAN, for each chest read:
+- **Item frame** on the chest's faces: `ItemFrame` entities
+  (`net.minecraft.world.entity.decoration.ItemFrame`) at/adjacent to the chest;
+  if one holds an item, record `chestId → framedItemId` (`frame.getItem()` →
+  ItemStack → registry id). VERIFY real 26.2 ItemFrame API.
+- **Text sign above** the chest (the block at chest.above(), a
+  `SignBlockEntity`): read its text → `chestId → sectionText`. Context only.
+Only chests WITH a frame are candidate destinations.
 
-Pass the resulting group→home assignment through `SortPlanner` (it already takes
-`itemToGroup`; ensure the frame-derived home wins — you may post-process the
-planner output or feed the home assignment in). Build green, commit
-`feat: item-frame chest labels override sort majority by category`.
+Groq payload: send each FRAMED chest as `{chestId, frameItem, section}` plus the
+loose items to be sorted. System prompt: each framed chest is the home for the
+**whole category** of its framed item; assign every item to the framed chest
+whose frame-item shares its category. The section text is context to improve
+categorization. Do NOT invent homes for unframed chests.
+
+EXECUTE: move each item to its category's framed chest. **If an item has no
+matching framed chest:** set the task to a PAUSED-NEEDS-FRAME state — surface
+status `no chest for <item>` (red, via the error/ask flow), leave that item where
+it is, and STOP. The owner adds a framed chest then resumes (the executor's
+`resumeWithInstruction`/"continue" path re-runs SCAN + grouping and places the
+remaining items). Items WITH a home are still placed before pausing (place what
+you can, then pause on the first unplaceable category) — or collect all
+unplaceable and pause once with the list; either is acceptable, prefer pausing
+once with the list of unplaceable items.
+
+`SortPlanner` majority logic is no longer used for destination assignment (frames
+decide). You may keep SortPlanner for move-batching but the home map comes from
+frames, not majority. Build green, commit
+`feat: framed-chests-only sorting with sign context and pause-on-missing-frame`.
