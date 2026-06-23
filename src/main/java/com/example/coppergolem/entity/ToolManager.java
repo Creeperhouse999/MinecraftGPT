@@ -1,6 +1,11 @@
 package com.example.coppergolem.entity;
 
+import com.example.coppergolem.craft.CraftingHelper;
+import com.example.coppergolem.craft.Recipes;
+import com.example.coppergolem.mine.Ores;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 
 import java.util.List;
@@ -38,10 +43,12 @@ public class ToolManager {
 
     private final GolemPrimitives g;
     private final ApprovalGate gate;
+    private final CraftingHelper crafts;
 
     public ToolManager(GolemPrimitives g, ApprovalGate gate) {
         this.g = g;
         this.gate = gate;
+        this.crafts = new CraftingHelper(g, gate);
     }
 
     // -------------------------------------------------------------------------
@@ -76,6 +83,55 @@ public class ToolManager {
         }
 
         // Step 5 — give up
+        return false;
+    }
+
+    /**
+     * Ensure the golem has a pickaxe of at least {@code minTier} as its active tool.
+     *
+     * <p>Sourcing order:
+     * <ol>
+     *   <li>Already in inventory — find any pickaxe whose tier >= minTier and equip it.</li>
+     *   <li>Pull from nearby chests — scan for a pickaxe of adequate tier.</li>
+     *   <li>Craft — try pickaxes from highest tier down to minTier if materials exist
+     *       (uses {@link CraftingHelper} with gate approval).</li>
+     *   <li>Return false — caller should fail the task.</li>
+     * </ol>
+     * </p>
+     *
+     * @param minTier the minimum {@link Ores.Tier} required
+     * @return true once a pickaxe of adequate tier is equipped; false if unreachable
+     */
+    public boolean ensurePickaxeOfTier(Ores.Tier minTier) {
+        // Step 1 — already in inventory
+        if (equipPickaxeOfTierFromInventory(minTier)) {
+            return true;
+        }
+
+        // Step 2 — search nearby chests
+        if (pullPickaxeOfTierFromChests(minTier)) {
+            return true;
+        }
+
+        // Step 3 — craft: attempt from best to worst tier starting at minTier
+        String[] candidates;
+        if (minTier.ordinal() <= Ores.Tier.IRON.ordinal()) {
+            candidates = new String[]{"minecraft:diamond_pickaxe", "minecraft:iron_pickaxe"};
+        } else if (minTier == Ores.Tier.DIAMOND) {
+            candidates = new String[]{"minecraft:diamond_pickaxe"};
+        } else {
+            // NETHERITE — we can't craft netherite here, fall through
+            candidates = new String[]{};
+        }
+        for (String pickaxeId : candidates) {
+            Ores.Tier pickTier = Ores.tierOf(pickaxeId.contains(":") ? pickaxeId.substring(pickaxeId.indexOf(":") + 1) : pickaxeId);
+            if (pickTier.ordinal() < minTier.ordinal()) continue;
+            if (crafts.canCraft(pickaxeId) && crafts.craft(pickaxeId, 1)) {
+                return equipPickaxeOfTierFromInventory(minTier);
+            }
+        }
+
+        // Step 4 — give up
         return false;
     }
 
@@ -232,5 +288,53 @@ public class ToolManager {
             case PICKAXE -> g.inventory().findPickaxeSlot();
             case AXE     -> g.inventory().findAxeSlot();
         };
+    }
+
+    /**
+     * Scan the inventory for a pickaxe with tier >= {@code minTier} and equip it.
+     * Returns true on success.
+     */
+    private boolean equipPickaxeOfTierFromInventory(Ores.Tier minTier) {
+        var inv = g.inventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            var stack = inv.getItem(i);
+            if (stack.isEmpty()) continue;
+            Identifier key = BuiltInRegistries.ITEM.getKey(stack.getItem());
+            if (key == null) continue;
+            String path = key.getPath();
+            if (!path.endsWith("_pickaxe")) continue;
+            Ores.Tier t = Ores.tierOf(path);
+            if (t.ordinal() >= minTier.ordinal()) {
+                inv.equipFromSlot(i);
+                return g.equipTool(inv.activeTool());
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Search nearby chests for a pickaxe with tier >= {@code minTier} and pull it.
+     * Returns true on success.
+     */
+    private boolean pullPickaxeOfTierFromChests(Ores.Tier minTier) {
+        List<BlockPos> chests = g.findChests(CHEST_SEARCH_RADIUS);
+        for (BlockPos chest : chests) {
+            Map<Item, Integer> contents = g.readChest(chest);
+            for (Map.Entry<Item, Integer> entry : contents.entrySet()) {
+                Identifier key = BuiltInRegistries.ITEM.getKey(entry.getKey());
+                if (key == null) continue;
+                String path = key.getPath();
+                if (!path.endsWith("_pickaxe")) continue;
+                Ores.Tier t = Ores.tierOf(path);
+                if (t.ordinal() >= minTier.ordinal()) {
+                    if (!gate.request("take " + path)) continue;
+                    int pulled = g.pullFromChest(chest, entry.getKey(), 1);
+                    if (pulled > 0 && equipPickaxeOfTierFromInventory(minTier)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 }

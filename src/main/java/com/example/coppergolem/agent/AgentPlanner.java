@@ -29,7 +29,11 @@ public final class AgentPlanner {
             "You are a Minecraft bot planner. Given a goal and the bot's current world context, " +
             "output ONLY a JSON object with this exact structure:\n" +
             "{\"plan\":[{\"kind\":\"<verb>\",\"args\":{\"key\":\"value\",...},\"label\":\"<human description>\"}...]}\n" +
-            "Valid kind values: sort, mine, chop, deposit, acquire_tool, craft, torch.\n" +
+            "Valid kind values: sort, mine, chop, deposit, acquire_tool, craft, torch, ore_hunt.\n" +
+            "ore_hunt: targeted ore mining. Example: {\"kind\":\"ore_hunt\",\"args\":{\"ore\":\"diamond\",\"count\":\"30\"}}. " +
+            "The golem strip-mines at the optimal Y level and collects the target ore; it also picks up " +
+            "incidental ores (iron, redstone, lapis, etc.) encountered along the way. " +
+            "The golem will automatically acquire an iron+ pickaxe when required by the ore tier.\n" +
             "Account for tool durability, spares in inventory, and available inventory space " +
             "when choosing step counts and args.\n" +
             "Return ONLY valid JSON. No markdown, no explanation, no extra keys.\n" +

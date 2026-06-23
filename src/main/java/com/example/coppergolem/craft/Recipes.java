@@ -99,6 +99,18 @@ public final class Recipes {
                 Map.of("minecraft:cobblestone", 3, "minecraft:stick", 2),
                 true));
 
+        // iron_pickaxe <- 3 iron_ingot + 2 sticks
+        t.put("minecraft:iron_pickaxe", new Recipe(
+                "minecraft:iron_pickaxe", 1,
+                Map.of("minecraft:iron_ingot", 3, "minecraft:stick", 2),
+                true));
+
+        // diamond_pickaxe <- 3 diamond + 2 sticks
+        t.put("minecraft:diamond_pickaxe", new Recipe(
+                "minecraft:diamond_pickaxe", 1,
+                Map.of("minecraft:diamond", 3, "minecraft:stick", 2),
+                true));
+
         TABLE = Collections.unmodifiableMap(t);
     }
 

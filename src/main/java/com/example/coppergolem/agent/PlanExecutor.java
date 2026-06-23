@@ -320,6 +320,12 @@ public final class PlanExecutor {
                 );
             }
 
+            case "ore_hunt" -> {
+                String oreArg  = args.getOrDefault("ore", "coal");
+                int oreCount   = parseInt(args, "count", 1);
+                yield new OreHuntTask(oreArg, oreCount, tools, g);
+            }
+
             default -> null; // unknown kind → step will be skipped
         };
     }

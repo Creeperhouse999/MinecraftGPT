@@ -90,21 +90,9 @@ public final class OreHuntTask implements TaskHandler {
             // Canonical ore block id (strip "deepslate_" variant not needed for lookup)
             oreBlockId = info.blockId();
 
-            // Ensure a pickaxe of some kind.
-            // TODO(C3): replace with tools.ensurePickaxeOfTier(info.minTier()) when that
-            //   method is available so we can acquire iron+ pickaxes automatically.
-            if (!tools.ensureTool(ToolManager.ToolKind.PICKAXE)) {
-                failed = "no pickaxe and no materials";
-                return true;
-            }
-
-            // Determine active pick id after ensureTool
-            activePickId = resolveActivePickId(g);
-
-            // Tier check
-            if (!Ores.canMine(oreBlockId, activePickId)) {
-                Ores.OreInfo oreInfo = infoOpt.get();
-                failed = "need " + oreInfo.minTier().name().toLowerCase() + " pickaxe";
+            // Ensure a pickaxe of at least the tier required by this ore.
+            if (!tools.ensurePickaxeOfTier(info.minTier())) {
+                failed = "need " + info.minTier().name().toLowerCase() + " pickaxe";
                 return true;
             }
 
