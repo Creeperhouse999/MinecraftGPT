@@ -24,12 +24,8 @@ jobs:
           ./gradlew clean build
 
       - name: Upload to Falix via SFTP
-        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
-        with:
-          server: ${{ secrets.FALIX_HOST }}
-          port: ${{ secrets.FALIX_PORT }}
-          username: ${{ secrets.FALIX_USER }}
-          password: ${{ secrets.FALIX_PASS }}
-          local_path: build/libs/MinecraftGPT-*.jar
-          remote_path: /mods/
-          delete_remote_files: false
+        run: |
+          sudo apt-get install -y sshpass
+          sshpass -p "${{ secrets.FALIX_PASS }}" sftp -o StrictHostKeyChecking=no -P ${{ secrets.FALIX_PORT }} ${{ secrets.FALIX_USER }}@${{ secrets.FALIX_HOST }} <<EOF
+          put build/libs/MinecraftGPT-*.jar /mods/
+          EOF
