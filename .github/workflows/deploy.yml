@@ -7,6 +7,8 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -29,3 +31,11 @@ jobs:
           sshpass -p "${{ secrets.FALIX_PASS }}" sftp -o StrictHostKeyChecking=no -P ${{ secrets.FALIX_PORT }} ${{ secrets.FALIX_USER }}@${{ secrets.FALIX_HOST }} <<EOF
           put build/libs/MinecraftGPT-*.jar /mods/
           EOF
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Build
+          files: build/libs/MinecraftGPT-*.jar
+          make_latest: true
