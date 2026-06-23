@@ -8,6 +8,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.Container;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.animal.golem.CopperGolem;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
@@ -362,10 +363,21 @@ public final class WorldGolemPrimitives implements GolemPrimitives {
             return false;
         }
         // The active tool already lives in the golem inventory's active hotbar slot
-        // (GolemInventory.equipFromSlot moved it there). Nothing further to wire to
-        // the entity's hands for Plan A: mining uses level.destroyBlock, so the
-        // entity hand item is cosmetic. Treat a non-empty active tool as equipped.
+        // (GolemInventory.equipFromSlot moved it there). Also set it in the entity's
+        // main hand so unmodded clients can see the golem holding it.
+        // Uses MC 26.2 LivingEntity API: setItemInHand(InteractionHand, ItemStack).
+        golem.setItemInHand(InteractionHand.MAIN_HAND, tool);
         return !inventory.activeTool().isEmpty();
+    }
+
+    /**
+     * Sync the golem's main-hand item to whatever is currently the active tool in
+     * {@link GolemInventory}. Call this after any inventory change that may have
+     * swapped the active slot without going through {@link #equipTool}.
+     */
+    public void syncHeldItem() {
+        ItemStack active = inventory.activeTool();
+        golem.setItemInHand(InteractionHand.MAIN_HAND, active.isEmpty() ? ItemStack.EMPTY : active);
     }
 
     @Override
