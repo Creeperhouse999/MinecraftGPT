@@ -493,3 +493,20 @@ Chests can be labeled with an **item frame** to declare what category they hold.
   `ItemFrame` entity at the chest's faces) and records `chestId → framedItem`.
   This map is sent to Groq so it can honor frame labels when producing the
   `{item → group}` / group-home assignment.
+
+## Item-Frame Labels — Addendum: Text Signs as Section Context
+
+Real storage layouts pair an **item frame on each chest** (the chest's exact
+category — a flower frame means all flowers) with a **text sign above** naming a
+broader section ("nature"). The golem uses both, but they have different weight:
+
+- **Item frame = the deciding label.** The framed item's category determines what
+  goes in that chest (frame overrides majority, per the item-frame section).
+- **Text sign above a chest = context only.** During SCAN the golem also reads
+  the sign text above each chest and includes it in the Groq grouping payload as
+  a `"section"` hint, so the AI can group consistently (e.g. knowing a chest sits
+  under "nature" helps it categorize a framed item correctly). The sign does NOT
+  by itself assign items — the frame does.
+- D2 (item-frame task) is extended to read the sign block above each chest
+  (`SignBlockEntity` text) alongside the frame, recording
+  `chestId → {framedItem, sectionText}`.
