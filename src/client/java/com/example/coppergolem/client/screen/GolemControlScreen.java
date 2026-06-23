@@ -77,7 +77,7 @@ public final class GolemControlScreen extends Screen {
                 .bounds(cx - 150, 72, 70, 20).build());
 
         addRenderableWidget(Button.builder(Component.literal("Inventory"),
-                        b -> minecraft.setScreenAndShow(new GolemInventoryScreen(this)))
+                        b -> com.example.coppergolem.client.net.ClientNetworking.sendOpenInv())
                 .bounds(cx - 76, 72, 70, 20).build());
 
         addRenderableWidget(Button.builder(Component.literal("Give Hand Item"),

@@ -111,4 +111,8 @@ public final class ClientNetworking {
     public static void sendGiveItem() {
         ClientPlayNetworking.send(new Packets.GiveItemC2S());
     }
+
+    public static void sendOpenInv() {
+        ClientPlayNetworking.send(new Packets.OpenInvC2S());
+    }
 }

@@ -180,6 +180,20 @@ public final class Packets {
         public CustomPacketPayload.Type<GiveItemC2S> type() { return TYPE; }
     }
 
+    /** Client requests the server open the golem's container inventory screen. */
+    public record OpenInvC2S() implements CustomPacketPayload {
+
+        public static final CustomPacketPayload.Type<OpenInvC2S> TYPE =
+                new CustomPacketPayload.Type<>(
+                        Identifier.fromNamespaceAndPath("coppergolem", "open_inv_c2s"));
+
+        public static final StreamCodec<RegistryFriendlyByteBuf, OpenInvC2S> CODEC =
+                StreamCodec.unit(new OpenInvC2S());
+
+        @Override
+        public CustomPacketPayload.Type<OpenInvC2S> type() { return TYPE; }
+    }
+
     // =========================================================================
     // S2C payloads
     // =========================================================================
@@ -293,7 +307,8 @@ public final class Packets {
         PayloadTypeRegistry.serverboundPlay().register(ErrorChoiceC2S.TYPE,   ErrorChoiceC2S.CODEC);
         PayloadTypeRegistry.serverboundPlay().register(ZoneEditC2S.TYPE,      ZoneEditC2S.CODEC);
         PayloadTypeRegistry.serverboundPlay().register(SetHomeC2S.TYPE,       SetHomeC2S.CODEC);
-        PayloadTypeRegistry.serverboundPlay().register(GiveItemC2S.TYPE,     GiveItemC2S.CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(GiveItemC2S.TYPE,      GiveItemC2S.CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(OpenInvC2S.TYPE,      OpenInvC2S.CODEC);
 
         // S2C
         PayloadTypeRegistry.clientboundPlay().register(PlanViewS2C.TYPE,  PlanViewS2C.CODEC);

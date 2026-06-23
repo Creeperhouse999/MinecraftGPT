@@ -2,6 +2,7 @@ package com.example.coppergolem.net;
 
 import com.example.coppergolem.entity.GolemController;
 import com.example.coppergolem.inventory.GolemInventory;
+import com.example.coppergolem.inventory.GolemMenu;
 import com.example.coppergolem.net.Packets.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
@@ -102,6 +103,20 @@ public final class ServerNetworking {
                         GolemController ctrl = controllerFor.apply(player.getUUID());
                         if (ctrl == null || !ctrl.owner().equals(player.getUUID())) return;
                         ctrl.setHomePoint(new BlockPos(payload.x(), payload.y(), payload.z()));
+                    });
+                });
+
+        // OpenInvC2S — player requests the golem container inventory screen
+        ServerPlayNetworking.registerGlobalReceiver(Packets.OpenInvC2S.TYPE,
+                (payload, ctx) -> {
+                    ServerPlayer player = ctx.player();
+                    ctx.server().execute(() -> {
+                        GolemController ctrl = controllerFor.apply(player.getUUID());
+                        if (ctrl == null || !ctrl.owner().equals(player.getUUID())) return;
+                        GolemInventory golemInv = ctrl.inventory();
+                        player.openMenu(new net.minecraft.world.SimpleMenuProvider(
+                                (syncId, playerInv, p) -> new GolemMenu(syncId, playerInv, golemInv),
+                                net.minecraft.network.chat.Component.literal("Golem Inventory")));
                     });
                 });
 

@@ -7,6 +7,7 @@ import com.example.coppergolem.entity.GolemLife;
 import com.example.coppergolem.gemini.GroqClient;
 import com.example.coppergolem.gemini.KeyPool;
 import com.example.coppergolem.inventory.GolemInventory;
+import com.example.coppergolem.inventory.GolemMenu;
 import com.example.coppergolem.net.Packets;
 import com.example.coppergolem.net.ServerNetworking;
 import com.example.coppergolem.zone.ZoneManager;
@@ -67,6 +68,15 @@ public class CopperGolemMod implements ModInitializer {
             this.groq = new GroqClient(pool, config.model(), HttpClient.newHttpClient());
             this.planner = new AgentPlanner(this.groq);
         }
+
+        // ---- MenuType registration -------------------------------------------
+        // MenuType constructor is made accessible by fabric-menu-api-v1 classtweaker.
+        GolemMenu.TYPE = net.minecraft.core.Registry.register(
+                net.minecraft.core.registries.BuiltInRegistries.MENU,
+                net.minecraft.resources.Identifier.fromNamespaceAndPath(MOD_ID, "golem_inv"),
+                new net.minecraft.world.inventory.MenuType<>(
+                        GolemMenu::new,
+                        net.minecraft.world.flag.FeatureFlags.DEFAULT_FLAGS));
 
         // ---- Networking + life hooks ------------------------------------------
         Packets.register();
