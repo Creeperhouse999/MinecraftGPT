@@ -414,7 +414,7 @@ public final class WorldGolemPrimitives implements GolemPrimitives {
     private static boolean isPlayerBuiltBlock(String blockId) {
         // Strip namespace
         String id = blockId.contains(":") ? blockId.substring(blockId.indexOf(':') + 1) : blockId;
-        return id.contains("planks") || id.contains("log") || id.contains("wood")
+        return id.contains("planks")
             || id.contains("glass") || id.contains("wool") || id.contains("concrete")
             || id.contains("terracotta") || id.contains("brick") || id.contains("nether_brick")
             || id.contains("fence") || id.contains("door") || id.contains("trapdoor")
