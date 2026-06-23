@@ -80,6 +80,10 @@ public final class GolemControlScreen extends Screen {
                         b -> minecraft.setScreenAndShow(new GolemInventoryScreen(this)))
                 .bounds(cx - 76, 72, 70, 20).build());
 
+        addRenderableWidget(Button.builder(Component.literal("Give Hand Item"),
+                        b -> ClientNetworking.sendGiveItem())
+                .bounds(cx - 2, 72, 100, 20).build());
+
         // ── Per-failed-step recovery buttons ────────────────────────────────
         planTop = 104;
         List<StepLine> plan = ClientNetworking.plan();

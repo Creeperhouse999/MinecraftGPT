@@ -1,6 +1,7 @@
 package com.example.coppergolem.net;
 
 import com.example.coppergolem.entity.GolemController;
+import com.example.coppergolem.inventory.GolemInventory;
 import com.example.coppergolem.net.Packets.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
@@ -103,6 +104,28 @@ public final class ServerNetworking {
                         ctrl.setHomePoint(new BlockPos(payload.x(), payload.y(), payload.z()));
                     });
                 });
+
+        // GiveItemC2S — player gives main-hand item to golem inventory
+        ServerPlayNetworking.registerGlobalReceiver(GiveItemC2S.TYPE,
+                (payload, ctx) -> {
+                    ServerPlayer player = ctx.player();
+                    ctx.server().execute(() -> {
+                        GolemController ctrl = controllerFor.apply(player.getUUID());
+                        if (ctrl == null || !ctrl.owner().equals(player.getUUID())) return;
+                        net.minecraft.world.item.ItemStack held = player.getMainHandItem();
+                        if (held.isEmpty()) return;
+                        GolemInventory inv = ctrl.inventory();
+                        for (int i = 0; i < GolemInventory.STORAGE_SIZE; i++) {
+                            if (inv.getItem(i).isEmpty()) {
+                                inv.setItem(i, held.copy());
+                                player.setItemInHand(
+                                        net.minecraft.world.InteractionHand.MAIN_HAND,
+                                        net.minecraft.world.item.ItemStack.EMPTY);
+                                break;
+                            }
+                        }
+                    });
+                });
     }
 
     // =========================================================================
@@ -128,5 +151,11 @@ public final class ServerNetworking {
     /** Send the full zone list to the player. */
     public static void sendZoneList(ServerPlayer player, List<ZoneLine> zones) {
         ServerPlayNetworking.send(player, new ZoneListS2C(zones));
+    }
+
+    /** Send the current golem inventory snapshot to the player. */
+    public static void sendInventory(ServerPlayer player,
+                                     List<Packets.SlotLine> slots) {
+        ServerPlayNetworking.send(player, new Packets.InventoryS2C(slots));
     }
 }

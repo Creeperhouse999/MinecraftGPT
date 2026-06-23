@@ -8,6 +8,7 @@ import com.example.coppergolem.gemini.GroqClient;
 import com.example.coppergolem.inventory.GolemInventory;
 import com.example.coppergolem.net.Packets;
 import com.example.coppergolem.net.ServerNetworking;
+import net.minecraft.core.registries.BuiltInRegistries;
 import com.example.coppergolem.task.FollowTask;
 import com.example.coppergolem.task.TaskHandler;
 import com.example.coppergolem.zone.ZoneManager;
@@ -530,5 +531,31 @@ public final class GolemController {
             default -> com.example.coppergolem.CopperGolemMod.LOG.warn(
                     "[coppergolem] unknown zone op: {}", op);
         }
+        // After mutation, push updated list to owner.
+        if (server != null) {
+            ServerPlayer ownerPlayer = server.getPlayerList().getPlayer(owner);
+            if (ownerPlayer != null) {
+                java.util.List<Packets.ZoneLine> zoneList = zones.zones().stream()
+                        .map(z -> new Packets.ZoneLine(z.name(), z.minX(), z.minZ(), z.maxX(), z.maxZ()))
+                        .collect(java.util.stream.Collectors.toList());
+                ServerNetworking.sendZoneList(ownerPlayer, zoneList);
+            }
+        }
+    }
+
+    /**
+     * Returns the current inventory as a list of {@link Packets.SlotLine} rows
+     * for the UI (non-empty slots only).
+     */
+    public java.util.List<Packets.SlotLine> inventoryView() {
+        java.util.List<Packets.SlotLine> out = new ArrayList<>();
+        for (int i = 0; i < GolemInventory.SIZE; i++) {
+            net.minecraft.world.item.ItemStack stack = inventory.getItem(i);
+            if (!stack.isEmpty()) {
+                String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                out.add(new Packets.SlotLine(i, id, stack.getCount()));
+            }
+        }
+        return out;
     }
 }

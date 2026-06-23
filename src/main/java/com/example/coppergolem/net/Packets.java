@@ -163,6 +163,24 @@ public final class Packets {
     }
 
     // =========================================================================
+    // C2S — give item to golem
+    // =========================================================================
+
+    /** Client gives the item in their main hand to the golem's inventory. */
+    public record GiveItemC2S() implements CustomPacketPayload {
+
+        public static final CustomPacketPayload.Type<GiveItemC2S> TYPE =
+                new CustomPacketPayload.Type<>(
+                        Identifier.fromNamespaceAndPath("coppergolem", "give_item_c2s"));
+
+        public static final StreamCodec<RegistryFriendlyByteBuf, GiveItemC2S> CODEC =
+                StreamCodec.unit(new GiveItemC2S());
+
+        @Override
+        public CustomPacketPayload.Type<GiveItemC2S> type() { return TYPE; }
+    }
+
+    // =========================================================================
     // S2C payloads
     // =========================================================================
 
@@ -217,6 +235,32 @@ public final class Packets {
         public CustomPacketPayload.Type<StatusS2C> type() { return TYPE; }
     }
 
+    /** One row in an inventory view — slot index, item id, and count. */
+    public record SlotLine(int slot, String itemId, int count) {
+        static final StreamCodec<FriendlyByteBuf, SlotLine> CODEC =
+                StreamCodec.composite(
+                        ByteBufCodecs.VAR_INT,     SlotLine::slot,
+                        ByteBufCodecs.STRING_UTF8, SlotLine::itemId,
+                        ByteBufCodecs.VAR_INT,     SlotLine::count,
+                        SlotLine::new);
+    }
+
+    /** Server sends the current golem inventory (non-empty slots only). */
+    public record InventoryS2C(List<SlotLine> slots) implements CustomPacketPayload {
+
+        public static final CustomPacketPayload.Type<InventoryS2C> TYPE =
+                new CustomPacketPayload.Type<>(
+                        Identifier.fromNamespaceAndPath("coppergolem", "inventory_s2c"));
+
+        public static final StreamCodec<RegistryFriendlyByteBuf, InventoryS2C> CODEC =
+                StreamCodec.composite(
+                        SlotLine.CODEC.apply(ByteBufCodecs.list()), InventoryS2C::slots,
+                        InventoryS2C::new);
+
+        @Override
+        public CustomPacketPayload.Type<InventoryS2C> type() { return TYPE; }
+    }
+
     /** Server sends the full zone list. */
     public record ZoneListS2C(List<ZoneLine> zones) implements CustomPacketPayload {
 
@@ -249,9 +293,11 @@ public final class Packets {
         PayloadTypeRegistry.serverboundPlay().register(ErrorChoiceC2S.TYPE,   ErrorChoiceC2S.CODEC);
         PayloadTypeRegistry.serverboundPlay().register(ZoneEditC2S.TYPE,      ZoneEditC2S.CODEC);
         PayloadTypeRegistry.serverboundPlay().register(SetHomeC2S.TYPE,       SetHomeC2S.CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(GiveItemC2S.TYPE,     GiveItemC2S.CODEC);
 
         // S2C
         PayloadTypeRegistry.clientboundPlay().register(PlanViewS2C.TYPE,  PlanViewS2C.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(InventoryS2C.TYPE, InventoryS2C.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(AskGateS2C.TYPE,   AskGateS2C.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(StatusS2C.TYPE,    StatusS2C.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(ZoneListS2C.TYPE,  ZoneListS2C.CODEC);

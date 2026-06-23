@@ -97,6 +97,7 @@ public class CopperGolemMod implements ModInitializer {
                             controller.planView();
                     ServerNetworking.sendPlanView(owner, steps);
                     ServerNetworking.sendStatus(owner, controller.status(), 0, 0);
+                    ServerNetworking.sendInventory(owner, controller.inventoryView());
                 }
             }
         });
@@ -161,6 +162,22 @@ public class CopperGolemMod implements ModInitializer {
                     GolemRegistry.INSTANCE.remove(player.getUUID());
                     player.sendSystemMessage(
                             net.minecraft.network.chat.Component.literal("[golem] golem removed."));
+                    return 1;
+                }))
+                .then(Commands.literal("status").executes(ctx -> {
+                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                    GolemController ctrl = GolemRegistry.INSTANCE.get(player.getUUID());
+                    if (ctrl == null) {
+                        player.sendSystemMessage(
+                                net.minecraft.network.chat.Component.literal("[golem] no active golem."));
+                        return 0;
+                    }
+                    BlockPos pos = ctrl.golem().blockPosition();
+                    String msg = "[golem] status: " + ctrl.status()
+                            + " | pos: " + pos.getX() + "," + pos.getY() + "," + pos.getZ()
+                            + " | hp: " + (int) ctrl.golem().getHealth() + "/20";
+                    player.sendSystemMessage(
+                            net.minecraft.network.chat.Component.literal(msg));
                     return 1;
                 }));
 

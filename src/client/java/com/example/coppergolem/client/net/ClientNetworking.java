@@ -2,7 +2,9 @@ package com.example.coppergolem.client.net;
 
 import com.example.coppergolem.net.Packets;
 import com.example.coppergolem.net.Packets.AskGateS2C;
+import com.example.coppergolem.net.Packets.InventoryS2C;
 import com.example.coppergolem.net.Packets.PlanViewS2C;
+import com.example.coppergolem.net.Packets.SlotLine;
 import com.example.coppergolem.net.Packets.StatusS2C;
 import com.example.coppergolem.net.Packets.StepLine;
 import com.example.coppergolem.net.Packets.ZoneLine;
@@ -42,8 +44,11 @@ public final class ClientNetworking {
     /** Non-null when the server is waiting on an approval gate; the item text. */
     private static volatile String pendingAskGate = null;
 
+    private static volatile List<SlotLine> latestInventory = Collections.emptyList();
+
     public static List<StepLine> plan()        { return latestPlan; }
     public static List<ZoneLine> zones()       { return latestZones; }
+    public static List<SlotLine> inventory()   { return latestInventory; }
     public static String status()              { return latestStatus; }
     public static int activeKeys()             { return activeKeys; }
     public static int coolingKeys()            { return coolingKeys; }
@@ -71,6 +76,9 @@ public final class ClientNetworking {
 
         ClientPlayNetworking.registerGlobalReceiver(AskGateS2C.TYPE,
                 (payload, ctx) -> pendingAskGate = payload.itemDescription());
+
+        ClientPlayNetworking.registerGlobalReceiver(InventoryS2C.TYPE,
+                (payload, ctx) -> latestInventory = List.copyOf(payload.slots()));
     }
 
     // ── C2S senders ─────────────────────────────────────────────────────────
@@ -98,5 +106,9 @@ public final class ClientNetworking {
 
     public static void sendHome(int x, int y, int z) {
         ClientPlayNetworking.send(new Packets.SetHomeC2S(x, y, z));
+    }
+
+    public static void sendGiveItem() {
+        ClientPlayNetworking.send(new Packets.GiveItemC2S());
     }
 }

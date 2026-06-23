@@ -25,6 +25,7 @@ public final class GolemZoneScreen extends Screen {
     private static final int COL_HEADER  = 0xFFFFDD55;
     private static final int COL_ZONE    = 0xFFCCCCCC;
     private static final int COL_ERR     = 0xFFFF5555;
+    private static final int COL_SUCCESS = 0xFF55FF55;
 
     private final Screen parent;
 
@@ -40,8 +41,10 @@ public final class GolemZoneScreen extends Screen {
     private EditBox fieldHomeY;
     private EditBox fieldHomeZ;
 
-    /** Non-null error message displayed for one render pass after a parse error. */
+    /** Non-null error message displayed after a parse error (red). */
     private String errorMsg = null;
+    /** Non-null feedback displayed after a successful send (green). */
+    private String successMsg = null;
 
     public GolemZoneScreen(Screen parent) {
         super(Component.literal("Golem Zones"));
@@ -107,15 +110,17 @@ public final class GolemZoneScreen extends Screen {
     private void submitZone(String op) {
         try {
             String name = fieldName.getValue().trim();
-            if (name.isEmpty()) { errorMsg = "Zone name required"; return; }
+            if (name.isEmpty()) { errorMsg = "Zone name required"; successMsg = null; return; }
             int minX = parseInt(fieldMinX.getValue());
             int minZ = parseInt(fieldMinZ.getValue());
             int maxX = parseInt(fieldMaxX.getValue());
             int maxZ = parseInt(fieldMaxZ.getValue());
             ClientNetworking.sendZoneEdit(op, name, minX, minZ, maxX, maxZ);
             errorMsg = null;
+            successMsg = "Sent! (spawn golem first if no effect)";
         } catch (NumberFormatException e) {
             errorMsg = "Coords must be integers";
+            successMsg = null;
         }
     }
 
@@ -126,8 +131,10 @@ public final class GolemZoneScreen extends Screen {
             int z = parseInt(fieldHomeZ.getValue());
             ClientNetworking.sendHome(x, y, z);
             errorMsg = null;
+            successMsg = "Sent! (spawn golem first if no effect)";
         } catch (NumberFormatException e) {
             errorMsg = "Home coords must be integers";
+            successMsg = null;
         }
     }
 
@@ -146,14 +153,18 @@ public final class GolemZoneScreen extends Screen {
 
         g.centeredText(this.font, this.title, this.width / 2, 8, COL_LABEL);
 
+        // Tip line
+        g.text(this.font, "Tip: spawn golem first with /golem spawn",
+                listX, 20, COL_HEADER);
+
         // Left: zone list header
-        g.text(this.font, "Active Zones:", listX, 20, COL_HEADER);
+        g.text(this.font, "Active Zones:", listX, 30, COL_HEADER);
 
         List<ZoneLine> zones = ClientNetworking.zones();
         if (zones.isEmpty()) {
-            g.text(this.font, "(none)", listX, 32, COL_ZONE);
+            g.text(this.font, "(none)", listX, 42, COL_ZONE);
         } else {
-            int y = 32;
+            int y = 42;
             for (ZoneLine z : zones) {
                 String line = z.name() + "  (" + z.minX() + "," + z.minZ()
                         + ") -> (" + z.maxX() + "," + z.maxZ() + ")";
@@ -178,9 +189,11 @@ public final class GolemZoneScreen extends Screen {
             g.text(this.font, "Home",  lx, fy,      COL_HEADER);
         }
 
-        // Error line
+        // Feedback lines
         if (errorMsg != null) {
             g.text(this.font, errorMsg, formX, this.height - 28, COL_ERR);
+        } else if (successMsg != null) {
+            g.text(this.font, successMsg, formX, this.height - 28, COL_SUCCESS);
         }
     }
 
