@@ -77,6 +77,13 @@ public final class WorldGolemPrimitives implements GolemPrimitives {
     /** Mined-block counter feeding the auto-torch cadence. */
     private int blocksSinceTorch = 0;
 
+    /** Current block being mined (for delay simulation). */
+    private BlockPos miningTarget = null;
+    /** Ticks spent mining current block so far. */
+    private int miningTicks = 0;
+    /** Ticks required to mine current block (based on hardness). */
+    private int miningTicksRequired = 0;
+
     public WorldGolemPrimitives(CopperGolem golem,
                                 ServerLevel level,
                                 ZoneManager zones,
@@ -111,7 +118,7 @@ public final class WorldGolemPrimitives implements GolemPrimitives {
     @Override
     public boolean mineBlock(BlockPos pos) {
         if (zones.isProtected(pos.getX(), pos.getZ())) {
-            return false; // build protection: refuse to mine inside a zone
+            return false;
         }
 
         BlockState state = level.getBlockState(pos);
@@ -119,22 +126,49 @@ public final class WorldGolemPrimitives implements GolemPrimitives {
             return false;
         }
 
-        // Capture drops into the golem inventory: break WITHOUT world drops, then
-        // synthesize the loot ourselves so it lands in the attachment inventory
-        // rather than on the ground. (destroyBlock(pos, false) = no item drops.)
+        // Safety: never mine player-built materials (planks, glass, wool, bricks, etc.)
+        String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        if (isPlayerBuiltBlock(blockId)) {
+            return false;
+        }
+
+        // Init mining delay when starting a new block
+        if (!pos.equals(miningTarget)) {
+            miningTarget = pos;
+            miningTicks = 0;
+            // destroySpeed: hardness / tool speed, clamped 1-40 ticks (0.5s - 2s)
+            float hardness = state.getDestroySpeed(level, pos);
+            if (hardness < 0) hardness = 50; // unbreakable
+            // Estimate ticks: hardness * 5, min 5, max 60
+            miningTicksRequired = (int) Math.max(5, Math.min(60, hardness * 5));
+            // Show mining animation via block break progress (0-9)
+            level.destroyBlockProgress(golem.getId(), pos, 0);
+        }
+
+        miningTicks++;
+        // Update crack animation (0-9 scale)
+        int progress = Math.min(9, (miningTicks * 10) / miningTicksRequired);
+        level.destroyBlockProgress(golem.getId(), pos, progress);
+
+        // Not done yet
+        if (miningTicks < miningTicksRequired) {
+            syncHeldItem();
+            return false; // return false = not done, caller re-ticks
+        }
+
+        // Done — actually break the block
+        miningTarget = null;
+        level.destroyBlockProgress(golem.getId(), pos, -1); // clear animation
+
         ItemStack drop = new ItemStack(state.getBlock().asItem());
         boolean broken = level.destroyBlock(pos, false);
         if (!broken) {
             return false;
         }
         if (!drop.isEmpty()) {
-            // addItem returns the leftover that did not fit; we discard the
-            // leftover (inventory full) rather than spilling it.
             inventory.addItem(drop);
         }
-        // Also sweep any item entities the break may have produced.
         pickupNearbyItems(2);
-
         placeTorchIfNeeded(pos);
         return true;
     }
@@ -374,6 +408,23 @@ public final class WorldGolemPrimitives implements GolemPrimitives {
         // Uses MC 26.2 LivingEntity API: setItemInHand(InteractionHand, ItemStack).
         golem.setItemInHand(InteractionHand.MAIN_HAND, tool);
         return !inventory.activeTool().isEmpty();
+    }
+
+    /** Returns true for blocks that are player-built and must never be mined. */
+    private static boolean isPlayerBuiltBlock(String blockId) {
+        // Strip namespace
+        String id = blockId.contains(":") ? blockId.substring(blockId.indexOf(':') + 1) : blockId;
+        return id.contains("planks") || id.contains("log") || id.contains("wood")
+            || id.contains("glass") || id.contains("wool") || id.contains("concrete")
+            || id.contains("terracotta") || id.contains("brick") || id.contains("nether_brick")
+            || id.contains("fence") || id.contains("door") || id.contains("trapdoor")
+            || id.contains("slab") || id.contains("stairs") || id.contains("wall")
+            || id.contains("sign") || id.contains("chest") || id.contains("barrel")
+            || id.contains("furnace") || id.contains("crafting") || id.contains("bookshelf")
+            || id.contains("carpet") || id.contains("bed") || id.contains("candle")
+            || id.contains("lantern") || id.contains("torch") || id.contains("iron_block")
+            || id.contains("gold_block") || id.contains("diamond_block") || id.contains("emerald_block")
+            || id.contains("netherite_block");
     }
 
     /**

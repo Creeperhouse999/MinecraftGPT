@@ -30,7 +30,7 @@ public final class AgentPlanner {
             "You are a Minecraft bot planner. Given a goal and the bot's current world context, " +
             "output ONLY a JSON object with this exact structure:\n" +
             "{\"plan\":[{\"kind\":\"<verb>\",\"args\":{\"key\":\"value\",...},\"label\":\"<human description>\"}...]}\n" +
-            "Valid kind values ONLY: sort, mine, chop, deposit, acquire_tool, craft, torch, ore_hunt, follow, come, attack, defend.\n" +
+            "Valid kind values ONLY: sort, mine, chop, deposit, acquire_tool, craft, torch, ore_hunt, follow, come, attack, defend, chat.\n" +
             "- sort: sort nearby chests. No args needed.\n" +
             "- mine: mine blocks. Args: material (cobblestone/dirt/stone/gravel), count (number).\n" +
             "- chop: chop trees. Args: count (number of trees).\n" +
@@ -42,8 +42,10 @@ public final class AgentPlanner {
             "- come: move to owner once and stop. No args. Return {\"kind\":\"come\",\"args\":{},\"label\":\"Come to owner\"}\n" +
             "- attack: attack nearby hostile mobs until area is clear. No args. Return {\"kind\":\"attack\",\"args\":{},\"label\":\"Attack hostiles\"}\n" +
             "- defend: continuously attack any hostile that comes near. No args. Return {\"kind\":\"defend\",\"args\":{},\"label\":\"Defend mode\"}\n" +
+            "- chat: reply to a greeting or question. Args: message (your friendly reply as the golem). Use for greetings, questions, small talk, anything conversational.\n" +
             "IMPORTANT RULES:\n" +
-            "1. If the goal is NOT one of the above tasks (e.g. 'build', 'place'), " +
+            "1. If the goal is conversational (hi, hello, how are you, what can you do, etc.), use 'chat' kind with a friendly golem reply.\n" +
+            "2. If the goal is NOT one of the above tasks (e.g. 'build', 'place'), " +
             "return {\"plan\":[{\"kind\":\"unknown\",\"args\":{},\"label\":\"Task not supported: <goal>\"}]}\n" +
             "2. NEVER plan to mine near the bot's current position (within 10 blocks) - always move away first.\n" +
             "3. For mining tasks, only mine cobblestone/stone/dirt/gravel - NOT building materials or ores (use ore_hunt for ores).\n" +

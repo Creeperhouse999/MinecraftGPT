@@ -384,6 +384,29 @@ public final class PlanExecutor {
 
             case "defend" -> new DefendTask();
 
+            case "chat" -> {
+                String message = args.getOrDefault("message", "Hello!");
+                final MinecraftServer chatServer = this.server;
+                final UUID chatOwner = this.ownerId;
+                yield new TaskHandler() {
+                    private boolean done = false;
+                    @Override public boolean tick(GolemPrimitives g) {
+                        if (!done && chatServer != null && chatOwner != null) {
+                            ServerPlayer p = chatServer.getPlayerList().getPlayer(chatOwner);
+                            if (p != null) {
+                                p.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                                    "[Golem] " + message));
+                            }
+                            done = true;
+                        }
+                        return done;
+                    }
+                    @Override public String status() { return done ? "said: " + message : "chatting"; }
+                    @Override public void pause() {}
+                    @Override public void resume() {}
+                };
+            }
+
             case "unknown" -> new TaskHandler() {
                 @Override public boolean tick(GolemPrimitives g) { return true; }
                 @Override public String status() { return "failed: task not supported - " + step.label(); }
