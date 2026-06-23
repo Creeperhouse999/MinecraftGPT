@@ -2,7 +2,7 @@
 # Run this script whenever you want to update your client mod
 
 $repo = "Creeperhouse999/MinecraftGPT"
-$modName = "coppergolem"
+$modName = "MinecraftGPT"
 
 # Find CurseForge mods folder automatically
 $curseforgePaths = @(
