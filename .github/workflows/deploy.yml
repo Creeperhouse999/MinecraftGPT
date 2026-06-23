@@ -19,7 +19,9 @@ jobs:
           distribution: 'oracle'
 
       - name: Build mod
-        run: ./gradlew clean build
+        run: |
+          chmod +x gradlew
+          ./gradlew clean build
 
       - name: Upload to Falix via SFTP
         uses: wlixcc/SFTP-Deploy-Action@v1.2.4
