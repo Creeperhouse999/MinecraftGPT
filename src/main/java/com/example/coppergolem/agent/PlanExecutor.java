@@ -380,6 +380,20 @@ public final class PlanExecutor {
                 });
             }
 
+            case "bring" -> {
+                String bringItem = args.getOrDefault("item", "minecraft:cobblestone");
+                int bringCount = parseInt(args, "count", 1);
+                final UUID bOwnerId = this.ownerId;
+                final MinecraftServer bServer = this.server;
+                yield new BringTask(bringItem, bringCount,
+                    () -> {
+                        if (bServer == null || bOwnerId == null) return null;
+                        ServerPlayer p = bServer.getPlayerList().getPlayer(bOwnerId);
+                        return p != null ? p.blockPosition() : null;
+                    },
+                    bServer, bOwnerId);
+            }
+
             case "attack" -> new AttackTask();
 
             case "defend" -> new DefendTask();
