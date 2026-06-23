@@ -32,6 +32,13 @@ jobs:
           put build/libs/coppergolem-*.jar /mods/
           EOF
 
+      - name: Delete old latest release and tag
+        run: |
+          gh release delete latest --yes || true
+          git push origin :refs/tags/latest || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -39,3 +46,5 @@ jobs:
           name: Latest Build
           files: build/libs/coppergolem-*.jar
           make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
