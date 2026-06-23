@@ -112,4 +112,25 @@ public interface GolemPrimitives {
      * pickaxe, cobblestone+sticks for a stone one).
      */
     boolean hasCraftMaterials(String toolId);
+
+    // -------------------------------------------------------------------------
+    // Framed-chest / sign reading (Task D2)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Scan within {@code radius} blocks and return a map of
+     * {@code chestPos → registry-id of the item in the item frame on that chest}
+     * for every chest that has at least one {@link net.minecraft.world.entity.decoration.ItemFrame}
+     * on one of its six faces. Chests without a frame are omitted (they are not
+     * valid sort destinations). If a chest has multiple frames the first non-empty
+     * item found wins.
+     */
+    Map<BlockPos, String> readFramedChests(int radius);
+
+    /**
+     * Read the text from the sign placed directly above {@code chest}, or return
+     * an empty string if there is no sign there. Only the front text is read;
+     * all four lines are joined with a space.
+     */
+    String readSignAbove(BlockPos chest);
 }

@@ -6,14 +6,18 @@ import com.example.coppergolem.zone.ZoneManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.animal.golem.CopperGolem;
+import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.SignBlockEntity;
+import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.server.level.ServerLevel;
@@ -413,6 +417,76 @@ public final class WorldGolemPrimitives implements GolemPrimitives {
             }
         }
         return bases;
+    }
+
+    // -------------------------------------------------------------------------
+    // Framed-chest / sign reading (Task D2)
+    // -------------------------------------------------------------------------
+
+    /**
+     * For every chest within {@code radius} blocks that has an {@link ItemFrame}
+     * on one of its six faces, returns {@code chestPos → registry-id of the framed
+     * item}. Chests without a frame are omitted.
+     *
+     * <p>Implementation: for each chest position we build a small AABB (±1.5 blocks
+     * on all axes) and query {@code ServerLevel.getEntitiesOfClass(ItemFrame, aabb)}.
+     * An item frame hangs on the face of an adjacent block; its {@code blockPosition()}
+     * returns the block it is attached TO (i.e. the chest itself or the block behind
+     * it). We accept any frame whose {@code blockPosition()} equals the chest pos or
+     * is one step in the frame's facing direction away from the chest (i.e. the frame
+     * is mounted on the chest face). The first frame holding a non-empty item wins.</p>
+     */
+    @Override
+    public Map<BlockPos, String> readFramedChests(int radius) {
+        List<BlockPos> chests = findChests(radius);
+        Map<BlockPos, String> result = new java.util.LinkedHashMap<>();
+        for (BlockPos chest : chests) {
+            // Search a 3x3x3 area centred on the chest for item frames.
+            AABB box = new AABB(chest).inflate(1.5);
+            List<ItemFrame> frames = level.getEntitiesOfClass(ItemFrame.class, box);
+            for (ItemFrame frame : frames) {
+                // The frame's blockPosition() is the block it hangs on – that
+                // should be the chest block itself (frame on the chest face).
+                BlockPos framePos = frame.blockPosition();
+                if (!framePos.equals(chest)) {
+                    continue; // frame is on a different adjacent block, skip
+                }
+                ItemStack held = frame.getItem();
+                if (held.isEmpty()) {
+                    continue; // no item in this frame
+                }
+                Identifier itemId = BuiltInRegistries.ITEM.getKey(held.getItem());
+                if (itemId != null) {
+                    result.put(chest, itemId.toString());
+                    break; // first non-empty frame wins
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Read the front text of the sign directly above {@code chest}, joining all
+     * four lines with a space. Returns an empty string if there is no sign there.
+     */
+    @Override
+    public String readSignAbove(BlockPos chest) {
+        BlockPos above = chest.above();
+        if (!(level.getBlockEntity(above) instanceof SignBlockEntity sign)) {
+            return "";
+        }
+        SignText text = sign.getFrontText();
+        StringBuilder sb = new StringBuilder();
+        // SignText.getMessage(int line, boolean filtered) — 4 lines (0-3)
+        for (int i = 0; i < 4; i++) {
+            Component line = text.getMessage(i, false);
+            String s = line.getString().trim();
+            if (!s.isEmpty()) {
+                if (sb.length() > 0) sb.append(' ');
+                sb.append(s);
+            }
+        }
+        return sb.toString();
     }
 
     // -------------------------------------------------------------------------
