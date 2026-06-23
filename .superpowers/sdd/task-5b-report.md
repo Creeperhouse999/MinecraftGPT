@@ -39,5 +39,26 @@ BUILD SUCCESSFUL in 2s
 ## Concerns
 
 - Chest search in `pullFromChests` matches by `getDescriptionId()` suffix (e.g. ends with `"wooden_pickaxe"`). Description IDs typically look like `"item.minecraft.wooden_pickaxe"` so `.endsWith(toolId)` is correct, but if a mod overrides the description ID this could miss a match. A registry-key comparison would be more robust once the MC registry API is available in context.
-- `gatherCobble()` blindly mines blocks in a 7×3×7 area near the golem without checking block type. It will pick up whatever drops. This is intentional (simple gather loop) but may destroy non-stone blocks.
 - Stone-tier `idFor` upgrade is stubbed as wooden defaults; upgrading requires `g.inventory()` scan for cobblestone item which can be added in a follow-up.
+
+---
+
+## Bug Fix — Task 5b Amendment (commit c40c5e9)
+
+### Bug
+`gatherCobble()` mined ANY block in the 7×3×7 scan area — chests, builds, ores — indiscriminately.
+
+### Fix
+1. Added `String getBlockId(BlockPos pos)` to `GolemPrimitives` interface. Returns the registry path of the block at a position (e.g. `"stone"`, `"cobblestone"`). No existing implementations exist so the interface addition is safe.
+2. Added `STONE_BLOCK_IDS` constant set in `ToolManager`: `{ "stone", "cobblestone", "deepslate", "cobbled_deepslate" }`.
+3. `gatherCobble()` now calls `g.getBlockId(candidate)` before `g.mineBlock(candidate)` and skips any block whose registry path is not in `STONE_BLOCK_IDS`.
+
+### Block-type filtering status
+**Fully done here** — filtering happens in `ToolManager.gatherCobble()` via `GolemPrimitives.getBlockId()` before any mine call. No deferral to Task 13 required. Task 13 (`WorldGolemPrimitives.mineBlock`) will implement the concrete `getBlockId` by querying `Level.getBlockState(pos).getBlock()` and its registry key.
+
+### Build Output
+```
+BUILD SUCCESSFUL in 2s
+7 actionable tasks: 3 executed, 4 up-to-date
+```
+19 pre-existing compiler warnings (MC 26.2 class-file version mismatch), none new.

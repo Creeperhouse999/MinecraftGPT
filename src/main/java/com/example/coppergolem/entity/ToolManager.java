@@ -45,10 +45,22 @@ public class ToolManager {
     private final ApprovalGate gate;
     private final CraftingHelper crafts;
 
-    public ToolManager(GolemPrimitives g, ApprovalGate gate) {
+    /**
+     * Construct ToolManager sharing the controller's existing {@link CraftingHelper}.
+     * This ensures gate routing is consistent (IMPORTANT-G).
+     */
+    public ToolManager(GolemPrimitives g, ApprovalGate gate, CraftingHelper crafts) {
         this.g = g;
         this.gate = gate;
-        this.crafts = new CraftingHelper(g, gate);
+        this.crafts = crafts;
+    }
+
+    /**
+     * Convenience constructor that creates a new {@link CraftingHelper}.
+     * Prefer the three-arg constructor from the controller to avoid duplicate helpers.
+     */
+    public ToolManager(GolemPrimitives g, ApprovalGate gate) {
+        this(g, gate, new CraftingHelper(g, gate));
     }
 
     // -------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Runs a list of {@link PlanStep}s as the golem's active job.
@@ -82,6 +83,13 @@ public final class PlanExecutor {
     /** Human-readable reason the last step failed. */
     private String errorInfo = null;
 
+    /**
+     * In-flight async AI call for resumeWithInstruction / doItYourself.
+     * Non-null while we are waiting for the LLM to return a re-plan.
+     * Checked at the top of tick() so we never block the server thread.
+     */
+    private CompletableFuture<List<PlanStep>> pendingReplan = null;
+
     // -------------------------------------------------------------------------
     // Constructor
     // -------------------------------------------------------------------------
@@ -111,6 +119,22 @@ public final class PlanExecutor {
      * Returns immediately when stopped or all steps are complete.
      */
     public void tick(GolemPrimitives g) {
+        // Poll for a completed async replan (from resumeWithInstruction / doItYourself).
+        if (pendingReplan != null && pendingReplan.isDone()) {
+            List<PlanStep> newSteps;
+            try {
+                newSteps = pendingReplan.join();
+            } catch (Exception ex) {
+                newSteps = Collections.emptyList();
+            }
+            pendingReplan = null;
+            if (!newSteps.isEmpty()) {
+                spliceAt(cursor, newSteps);
+            }
+            errorInfo = null;
+            stopped = false;
+        }
+
         if (stopped || cursor >= entries.size()) return;
 
         // Autonomy: inventory-full detour (runs before/instead of normal step logic)
@@ -166,10 +190,12 @@ public final class PlanExecutor {
 
     /**
      * Re-plan from the failed step using the owner's corrective instruction.
-     * Splices AI-generated steps in place of the failed step and resumes.
+     * Fires an async AI call (CRITICAL-2); the result is applied on the next tick
+     * via {@link #pendingReplan}.
      */
     public void resumeWithInstruction(String instr) {
         if (!stopped || cursor >= entries.size()) return;
+        if (pendingReplan != null) return; // already waiting
 
         String context = buildWorldContext();
         String system =
@@ -181,22 +207,18 @@ public final class PlanExecutor {
         String user = "Failed step: " + entries.get(cursor).step.label() +
                       "\nInstruction: " + instr;
 
-        Optional<String> resp = ai.generateJson(system, user);
-        List<PlanStep> newSteps = resp.map(AgentPlanner::parse)
-                                      .orElse(Collections.emptyList());
-        if (!newSteps.isEmpty()) {
-            spliceAt(cursor, newSteps);
-        }
-        errorInfo = null;
-        stopped = false;
+        pendingReplan = ai.generateJsonAsync(system, user)
+                .thenApply(opt -> opt.map(AgentPlanner::parse).orElse(Collections.emptyList()));
     }
 
     /**
      * Ask the AI to autonomously plan around the error and splice the result in.
-     * One AI call; does not require further owner input.
+     * Fires an async AI call (CRITICAL-2); the result is applied on the next tick
+     * via {@link #pendingReplan}.
      */
     public void doItYourself() {
         if (!stopped || cursor >= entries.size()) return;
+        if (pendingReplan != null) return; // already waiting
 
         String context = buildWorldContext();
         String system =
@@ -208,14 +230,8 @@ public final class PlanExecutor {
         String user = "Failed step: " + entries.get(cursor).step.label() +
                       "\nError: " + errorInfo;
 
-        Optional<String> resp = ai.generateJson(system, user);
-        List<PlanStep> newSteps = resp.map(AgentPlanner::parse)
-                                      .orElse(Collections.emptyList());
-        if (!newSteps.isEmpty()) {
-            spliceAt(cursor, newSteps);
-        }
-        errorInfo = null;
-        stopped = false;
+        pendingReplan = ai.generateJsonAsync(system, user)
+                .thenApply(opt -> opt.map(AgentPlanner::parse).orElse(Collections.emptyList()));
     }
 
     /** Permanently stop execution. */
@@ -330,14 +346,16 @@ public final class PlanExecutor {
         };
     }
 
-    /** Perform an immediate deposit to the nearest chest as a mid-task detour. */
+    /** Perform an immediate deposit to the nearest chest as a mid-task detour.
+     *  Only dumps storage slots [0..STORAGE_SIZE) — never armor/offhand (MINOR-J). */
     private void runDepositDetour(GolemPrimitives g) {
         depositDetour = true;
         List<BlockPos> chests = g.findChests(16);
         if (chests.isEmpty()) return;
         BlockPos chest = chests.get(0);
         var inv = g.inventory();
-        for (int i = 0; i < inv.getContainerSize(); i++) {
+        // STORAGE_SIZE = 36 (hotbar + main); excludes armor[36-39] and offhand[40].
+        for (int i = 0; i < com.example.coppergolem.inventory.GolemInventory.STORAGE_SIZE; i++) {
             var stack = inv.getItem(i);
             if (!stack.isEmpty()) {
                 g.pushToChest(chest, stack.getItem(), stack.getCount());
@@ -413,7 +431,8 @@ public final class PlanExecutor {
             if (!g.moveTo(chest)) return false;
             var inv = g.inventory();
             int moved = 0;
-            for (int i = 0; i < inv.getContainerSize(); i++) {
+            // Only dump storage slots (hotbar+main); skip armor/offhand (MINOR-J).
+            for (int i = 0; i < com.example.coppergolem.inventory.GolemInventory.STORAGE_SIZE; i++) {
                 var stack = inv.getItem(i);
                 if (!stack.isEmpty()) {
                     moved += g.pushToChest(chest, stack.getItem(), stack.getCount());

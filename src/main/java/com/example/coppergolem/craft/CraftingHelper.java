@@ -4,6 +4,7 @@ import com.example.coppergolem.entity.ApprovalGate;
 import com.example.coppergolem.entity.GolemPrimitives;
 import com.example.coppergolem.inventory.GolemInventory;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
@@ -170,12 +171,22 @@ public final class CraftingHelper {
         // Ask gate before placing
         if (!gate.request("place crafting_table")) return false;
 
-        // Place the crafting table one block in front of the golem
+        // Try all 4 cardinal neighbors for an air spot; fail only if none work (IMPORTANT-H).
         Item tableItem = itemForId("minecraft:crafting_table");
         if (tableItem == null) return false;
 
-        BlockPos placePos = g.position().north(); // adjacent block for the table
-        return g.placeBlock(placePos, tableItem);
+        BlockPos origin = g.position();
+        for (Direction dir : new Direction[]{ Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST }) {
+            BlockPos candidate = origin.relative(dir);
+            String blockId = g.getBlockId(candidate);
+            // Only place on air (empty) blocks to avoid griefing.
+            if ("air".equals(blockId) || "minecraft:air".equals(blockId) || blockId == null || blockId.isEmpty()) {
+                if (g.placeBlock(candidate, tableItem)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

@@ -36,18 +36,22 @@ import java.util.UUID;
  */
 public final class GolemLife {
 
-    /** Default home point — owner should override via {@link #setHomePoint}. */
-    private static final BlockPos DEFAULT_HOME = new BlockPos(-5616, 64, 3872);
-
-    /** Where the golem respawns after death. */
-    private BlockPos homePoint;
+    /**
+     * Where the golem respawns after death.
+     * Null until the owner sets it via {@link #setHomePoint} (or spawn sets it).
+     * If null at death time, respawn uses the entity's own spawn position
+     * (IMPORTANT-I: no hardcoded dev coordinate as silent default).
+     */
+    private BlockPos homePoint = null;
 
     /**
-     * Constructs a GolemLife with the default home point.
+     * Constructs a GolemLife with no home point set.
+     * The normal spawn path calls {@code controller.setHomePoint(spawnPos)}
+     * immediately after construction, so this will be populated before any death.
      * Call {@link #initHealth(CopperGolem)} immediately after the entity spawns.
      */
     public GolemLife() {
-        this.homePoint = DEFAULT_HOME;
+        this.homePoint = null;
     }
 
     /**
@@ -119,10 +123,19 @@ public final class GolemLife {
      * @return the new {@link GolemController}, or {@code null} if the spawn failed
      */
     public GolemController respawn(ServerLevel level, GolemController controller) {
-        // Spawn fresh copper golem at home point.
+        // Determine spawn position: prefer homePoint, fall back to the dead golem's position.
+        BlockPos spawnPos;
+        if (homePoint != null) {
+            spawnPos = homePoint;
+        } else {
+            // Use the dead entity's position as fallback.
+            spawnPos = controller.golem().blockPosition();
+        }
+
+        // Spawn fresh copper golem at determined position.
         // PostSpawnProcessor<T> has a single-arg apply(T) method (verified in 26.2 jar).
         CopperGolem fresh = net.minecraft.world.entity.EntityTypes.COPPER_GOLEM
-                .spawn(level, entity -> {}, homePoint,
+                .spawn(level, entity -> {}, spawnPos,
                         EntitySpawnReason.COMMAND, false, false);
         if (fresh == null) {
             return null;
@@ -141,6 +154,10 @@ public final class GolemLife {
             }
         }
 
+        // Stop any in-flight executor on the dying controller so it doesn't
+        // keep ticking after the entity is removed (IMPORTANT-A).
+        controller.stop();
+
         // Re-use the ZoneManager and owner UUID.
         UUID owner = controller.owner();
         ZoneManager zones = controller.zones();
@@ -152,7 +169,7 @@ public final class GolemLife {
                 controller.planner(), controller.groq());
 
         // Carry the same home point into the new GolemLife.
-        newController.life().setHomePoint(homePoint);
+        newController.life().setHomePoint(spawnPos);
 
         return newController;
     }

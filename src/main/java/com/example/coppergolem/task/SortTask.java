@@ -9,6 +9,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Framed-chests-only sorting (Task D2).
@@ -21,7 +22,7 @@ import java.util.*;
  */
 public final class SortTask implements TaskHandler {
 
-    private enum Phase { SCAN, ASK, EXECUTE, DONE }
+    private enum Phase { SCAN, ASK, ASK_WAIT, EXECUTE, DONE }
 
     private static final String SYS =
         "You are a Minecraft item categorizer. You are given a list of framed storage " +
@@ -60,6 +61,9 @@ public final class SortTask implements TaskHandler {
     /** Execution queue. */
     private Deque<SortPlanner.Move> moves = new ArrayDeque<>();
 
+    /** In-flight async AI call; non-null only during ASK_WAIT phase. */
+    private CompletableFuture<Optional<String>> aiCall = null;
+
     public SortTask(Task.Sort spec, GroqClient ai) {
         this.spec = spec;
         this.ai = ai;
@@ -83,9 +87,28 @@ public final class SortTask implements TaskHandler {
                     phase = Phase.DONE;
                     break;
                 }
-                Map<String, String> assignments = askAi();
-                if (assignments == null) {
+                // Kick off the async call once, then move to ASK_WAIT.
+                aiCall = startAskAiAsync();
+                phase = Phase.ASK_WAIT;
+            }
+            case ASK_WAIT -> {
+                // Poll the future each tick — never block the server thread.
+                if (aiCall == null || !aiCall.isDone()) break; // still waiting
+                Optional<String> resp;
+                try {
+                    resp = aiCall.join();
+                } catch (Exception ex) {
+                    resp = Optional.empty();
+                }
+                aiCall = null;
+                if (resp.isEmpty()) {
                     error = "AI busy — all keys cooling";
+                    phase = Phase.DONE;
+                    break;
+                }
+                Map<String, String> assignments = parseAssignments(resp.get());
+                if (assignments == null) {
+                    error = "AI response parse failed";
                     phase = Phase.DONE;
                     break;
                 }
@@ -145,10 +168,11 @@ public final class SortTask implements TaskHandler {
     }
 
     // -------------------------------------------------------------------------
-    // ASK — send framed-chest catalogue + loose items to Groq
+    // ASK — send framed-chest catalogue + loose items to Groq (CRITICAL-2 async)
     // -------------------------------------------------------------------------
 
-    private Map<String, String> askAi() {
+    /** Build the JSON payload and fire the async AI request. */
+    private CompletableFuture<Optional<String>> startAskAiAsync() {
         JsonObject payload = new JsonObject();
 
         JsonArray chests = new JsonArray();
@@ -167,11 +191,13 @@ public final class SortTask implements TaskHandler {
         looseItems.forEach(items::addProperty);
         payload.add("looseItems", items);
 
-        Optional<String> resp = ai.generateJson(SYS, payload.toString());
-        if (resp.isEmpty()) return null;
+        return ai.generateJsonAsync(SYS, payload.toString());
+    }
 
+    /** Parse the AI JSON response into item→chestId assignments. */
+    private Map<String, String> parseAssignments(String json) {
         try {
-            JsonObject assignments = JsonParser.parseString(resp.get())
+            JsonObject assignments = JsonParser.parseString(json)
                 .getAsJsonObject()
                 .getAsJsonObject("assignments");
             Map<String, String> out = new HashMap<>();
@@ -258,10 +284,11 @@ public final class SortTask implements TaskHandler {
         if (needsFrame) return needsFrameStatus;
         if (error != null) return error;
         return switch (phase) {
-            case SCAN    -> "Sorting: scanning framed chests";
-            case ASK     -> "Sorting: planning with AI";
-            case EXECUTE -> "Sorting: " + moves.size() + " moves left";
-            case DONE    -> "Sorting: done";
+            case SCAN     -> "Sorting: scanning framed chests";
+            case ASK      -> "Sorting: planning with AI";
+            case ASK_WAIT -> "Sorting: waiting for AI response";
+            case EXECUTE  -> "Sorting: " + moves.size() + " moves left";
+            case DONE     -> "Sorting: done";
         };
     }
 
@@ -282,6 +309,7 @@ public final class SortTask implements TaskHandler {
         pendingNeedsFrame = false;
         pendingNeedsFrameStatus = "";
         error = null;
+        aiCall = null;
         phase = Phase.SCAN;
         moves.clear();
     }

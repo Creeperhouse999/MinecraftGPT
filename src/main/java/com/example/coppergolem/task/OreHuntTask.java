@@ -2,6 +2,7 @@ package com.example.coppergolem.task;
 
 import com.example.coppergolem.entity.GolemPrimitives;
 import com.example.coppergolem.entity.ToolManager;
+import com.example.coppergolem.inventory.GolemInventory;
 import com.example.coppergolem.mine.Ores;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -197,10 +198,11 @@ public final class OreHuntTask implements TaskHandler {
         return stripped.equals(oreBlockId) || stripped.equals("deepslate_" + oreBlockId);
     }
 
-    /** Push all non-empty storage slots into the given chest. */
+    /** Push all non-empty storage slots (hotbar+main only) into the given chest (MINOR-J). */
     private void dumpAll(GolemPrimitives g, BlockPos chest) {
         var inv = g.inventory();
-        for (int i = 0; i < inv.getContainerSize(); i++) {
+        // STORAGE_SIZE = 36: hotbar[0..8] + main[9..35]; excludes armor[36-39] + offhand[40].
+        for (int i = 0; i < GolemInventory.STORAGE_SIZE; i++) {
             var stack = inv.getItem(i);
             if (!stack.isEmpty()) {
                 g.pushToChest(chest, stack.getItem(), stack.getCount());

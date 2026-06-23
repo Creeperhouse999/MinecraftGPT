@@ -3,7 +3,9 @@ package com.example.coppergolem.gemini;
 import com.google.gson.*;
 import java.net.URI;
 import java.net.http.*;
+import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 public final class GroqClient {
     private static final String ENDPOINT =
@@ -33,33 +35,69 @@ public final class GroqClient {
     }
 
     private HttpResponse<String> send(String key, String sys, String user) throws Exception {
+        JsonObject body = buildBody(sys, user);
+        HttpRequest req = HttpRequest.newBuilder()
+            .uri(URI.create(ENDPOINT))
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer " + key)
+            .timeout(Duration.ofSeconds(15))
+            .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+            .build();
+        return http.send(req, HttpResponse.BodyHandlers.ofString());
+    }
+
+    /**
+     * Async variant: starts the HTTP call off the calling thread and returns a
+     * future that resolves to the extracted JSON string (same logic as
+     * {@link #generateJson} but non-blocking).
+     *
+     * <p>Key rotation / cooldown is applied before the request; on a non-2xx or
+     * parse error the key is marked cooling and the future resolves to empty.</p>
+     */
+    public CompletableFuture<Optional<String>> generateJsonAsync(String systemInstruction, String userText) {
+        Optional<String> key = pool.nextActiveKey();
+        if (key.isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        String chosenKey = key.get();
+        JsonObject body = buildBody(systemInstruction, userText);
+        HttpRequest req = HttpRequest.newBuilder()
+            .uri(URI.create(ENDPOINT))
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer " + chosenKey)
+            .timeout(Duration.ofSeconds(15))
+            .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+            .build();
+        return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+            .handle((resp, ex) -> {
+                if (ex != null || resp == null || resp.statusCode() / 100 != 2) {
+                    pool.markCooling(chosenKey, 60_000);
+                    return Optional.<String>empty();
+                }
+                Optional<String> text = extractText(resp.body());
+                if (text.isEmpty()) pool.markCooling(chosenKey, 60_000);
+                return text;
+            });
+    }
+
+    private JsonObject buildBody(String sys, String user) {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         JsonArray messages = new JsonArray();
-
         JsonObject sysMsg = new JsonObject();
         sysMsg.addProperty("role", "system");
         sysMsg.addProperty("content", sys);
         messages.add(sysMsg);
-
         JsonObject userMsg = new JsonObject();
         userMsg.addProperty("role", "user");
         userMsg.addProperty("content", user);
         messages.add(userMsg);
-
         body.add("messages", messages);
         body.addProperty("temperature", 0);
         JsonObject fmt = new JsonObject();
         fmt.addProperty("type", "json_object");
         body.add("response_format", fmt);
-
-        HttpRequest req = HttpRequest.newBuilder()
-            .uri(URI.create(ENDPOINT))
-            .header("Content-Type", "application/json")
-            .header("Authorization", "Bearer " + key)
-            .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
-            .build();
-        return http.send(req, HttpResponse.BodyHandlers.ofString());
+        return body;
     }
 
     private Optional<String> extractText(String responseBody) {

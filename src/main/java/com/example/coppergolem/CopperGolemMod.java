@@ -80,7 +80,9 @@ public class CopperGolemMod implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             // Reconcile owner index in case GolemLife respawned a golem last tick.
             GolemRegistry.INSTANCE.syncOwnerIndex();
-            for (GolemController controller : GolemRegistry.INSTANCE.all()) {
+            // Snapshot before iterating so GolemLife's respawn handler can safely
+            // mutate the registry during the loop (IMPORTANT-E).
+            for (GolemController controller : java.util.List.copyOf(GolemRegistry.INSTANCE.all())) {
                 ServerLevel level = (ServerLevel) controller.golem().level();
                 controller.tick(level);
 

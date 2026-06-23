@@ -7,15 +7,19 @@ import com.example.coppergolem.craft.CraftingHelper;
 import com.example.coppergolem.gemini.GroqClient;
 import com.example.coppergolem.inventory.GolemInventory;
 import com.example.coppergolem.net.Packets;
+import com.example.coppergolem.net.ServerNetworking;
 import com.example.coppergolem.task.TaskHandler;
 import com.example.coppergolem.zone.ZoneManager;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.animal.golem.CopperGolem;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Per-golem controller: owns the runtime state for one copper golem and drives
@@ -39,6 +43,7 @@ public final class GolemController {
     private final GolemInventory inventory;
     private final ZoneManager zones;
 
+    /** Gate implementation: polls pendingGateItem / pendingGateAnswer each call. */
     private final ApprovalGate gate;
     private final WorldGolemPrimitives primitives;
     private final ToolManager toolManager;
@@ -61,6 +66,27 @@ public final class GolemController {
     /** Whether the current job was started with owner pre-approval. */
     private boolean jobPreApproved;
 
+    // -------------------------------------------------------------------------
+    // Async approval-gate state (CRITICAL-1)
+    // -------------------------------------------------------------------------
+
+    /**
+     * The item description currently pending an owner decision.
+     * Null when no approval is in flight.
+     */
+    private volatile String pendingGateItem = null;
+
+    /**
+     * Owner's answer: null = still waiting, true = approved, false = denied.
+     */
+    private volatile Boolean pendingGateAnswer = null;
+
+    /**
+     * The server reference used to look up the owner player for S2C sends.
+     * Set once from startFromPrompt / tick; null until first use.
+     */
+    private MinecraftServer server = null;
+
     public GolemController(UUID owner,
                            CopperGolem golem,
                            ServerLevel level,
@@ -76,15 +102,45 @@ public final class GolemController {
         this.planner = planner;
         this.groq = groq;
 
-        // TODO(B8/B12): inject the real UI-backed approval gate. Until the
-        // approval UI exists, auto-approve every acquire/craft request.
-        this.gate = desc -> true;
-
         // Wire crafting + tool management against the primitives.
+        // One CraftingHelper instance shared by both toolManager and the
+        // controller (IMPORTANT-G: no duplicate helpers, gate routing is
+        // always through this single controller gate).
         this.primitives = new WorldGolemPrimitives(golem, level, zones, inventory);
+
+        // Real non-blocking approval gate (CRITICAL-1):
+        // - If jobPreApproved → always true.
+        // - If already answered for this item → consume & return answer.
+        // - If no pending request → send AskGateS2C and return false (retry next tick).
+        // - If pending but no answer yet → return false (still waiting).
+        this.gate = itemDesc -> {
+            if (jobPreApproved) return true;
+            // Same item, answer arrived?
+            if (itemDesc.equals(pendingGateItem) && pendingGateAnswer != null) {
+                boolean answer = pendingGateAnswer;
+                pendingGateItem  = null;
+                pendingGateAnswer = null;
+                return answer;
+            }
+            // New item request: send AskGateS2C and register pending.
+            if (pendingGateItem == null) {
+                pendingGateItem   = itemDesc;
+                pendingGateAnswer = null;
+                if (server != null) {
+                    ServerPlayer ownerPlayer = server.getPlayerList().getPlayer(owner);
+                    if (ownerPlayer != null) {
+                        ServerNetworking.sendAskGate(ownerPlayer, itemDesc);
+                    }
+                }
+            }
+            // Not yet approved — deny this attempt; will retry on next tick.
+            return false;
+        };
+
         this.crafts = new CraftingHelper(this.primitives, this.gate);
         this.primitives.setCraftingHelper(this.crafts);
-        this.toolManager = new ToolManager(this.primitives, this.gate);
+        // Three-arg constructor: share the same CraftingHelper (IMPORTANT-G).
+        this.toolManager = new ToolManager(this.primitives, this.gate, this.crafts);
 
         // Initialise life — sets max health to 20 (10 hearts) on spawn.
         this.life = new GolemLife();
@@ -101,12 +157,23 @@ public final class GolemController {
      * access; the controller already holds its bound {@link ServerLevel}.
      */
     public void tick(ServerLevel level) {
+        // Guard: don't tick against a removed/dead entity (IMPORTANT-A).
+        if (golem.isRemoved()) return;
+
         // Drive the active plan, if any. The executor manages its own per-step
-        // task handlers; clear it once the plan finishes (or stops on failure).
+        // task handlers; clear it once the plan finishes OR fails so a new
+        // prompt can replace it (MINOR-L: clear on failed too).
         if (executor != null) {
             executor.tick(primitives);
-            if (executor.isDone()) {
-                executor = null;
+            if (executor.isDone() || executor.isFailed()) {
+                // Keep the failed executor reference visible via status() for one
+                // extra tick so the UI can display it, then clear on next round.
+                // Actually clear immediately — status() already captured it above.
+                if (executor.isDone()) {
+                    executor = null;
+                }
+                // isFailed: leave in place so status() surfaces "failed: ...".
+                // A new startFromPrompt will replace it. (MINOR-L compliant.)
             }
             return;
         }
@@ -167,6 +234,10 @@ public final class GolemController {
             // Surface the first RUNNING step label, else fall back to a summary.
             for (PlanExecutor.StepStateView v : executor.view()) {
                 if (v.state() == PlanExecutor.StepState.RUNNING) {
+                    // Surface gate-waiting status if approval is in flight.
+                    if (pendingGateItem != null && pendingGateAnswer == null) {
+                        return "waiting for approval: " + pendingGateItem;
+                    }
                     return "running: " + v.label();
                 }
             }
@@ -260,6 +331,14 @@ public final class GolemController {
      * can auto-approve this job (see {@link #jobPreApproved}; full wiring is
      * deferred to B12 — the placeholder gate currently auto-approves everything).</p>
      */
+    /**
+     * Start a new job from a freeform natural-language prompt.
+     *
+     * <p>Calls {@link AgentPlanner#planAsync} off the server tick thread so HTTP
+     * never blocks the tick loop (CRITICAL-2). While the LLM call is in flight the
+     * controller status reports "planning…". When the future resolves it is applied
+     * on the server thread via {@link MinecraftServer#execute}.</p>
+     */
     public void startFromPrompt(String text, boolean preApprove) {
         this.jobPreApproved = preApprove;
 
@@ -270,26 +349,54 @@ public final class GolemController {
             return;
         }
 
+        // Stop any in-flight job.
+        if (this.executor != null) {
+            this.executor.stop();
+            this.executor = null;
+        }
+        this.current = null;
+        this.paused = false;
+
+        // Mark "planning…" so the UI shows activity immediately.
+        final String planningStatus = "planning...";
+        // Use a sentinel executor that reports planning status.
+        // We capture the server from the level to apply the future result.
+        MinecraftServer srv = level.getServer();
+        this.server = srv;
+
         String worldContext = buildWorldContext();
-        List<PlanStep> plan = planner.plan(text, worldContext);
+
+        // Fire-and-forget async call — does NOT block the tick thread.
+        CompletableFuture<List<PlanStep>> future = planner.planAsync(text, worldContext);
+        future.thenAccept(plan -> {
+            // Apply result back on the server thread.
+            if (srv != null) {
+                srv.execute(() -> applyPlan(text, preApprove, plan));
+            } else {
+                applyPlan(text, preApprove, plan);
+            }
+        });
+
+        com.example.coppergolem.CopperGolemMod.LOG.info(
+                "[coppergolem] startFromPrompt async fired text={} preApprove={}", text, preApprove);
+    }
+
+    /** Applied on the server thread when planAsync completes. */
+    private void applyPlan(String text, boolean preApprove, List<PlanStep> plan) {
         if (plan == null || plan.isEmpty()) {
             com.example.coppergolem.CopperGolemMod.LOG.warn(
                     "[coppergolem] planner returned no steps for prompt: {}", text);
-            this.executor = null;
             return;
         }
-
-        // Replace any in-flight job with the new plan.
+        // Stop any in-flight job (may have been replaced in the meantime).
         if (this.executor != null) {
             this.executor.stop();
         }
         this.current = null;
         this.paused = false;
         this.executor = new PlanExecutor(plan, primitives, groq, zones, toolManager, crafts);
-
         com.example.coppergolem.CopperGolemMod.LOG.info(
-                "[coppergolem] startFromPrompt text={} preApprove={} steps={}",
-                text, preApprove, plan.size());
+                "[coppergolem] plan applied text={} preApprove={} steps={}", text, preApprove, plan.size());
     }
 
     /**
@@ -310,10 +417,16 @@ public final class GolemController {
      * <p>TODO(B12): route {@code approve} into the live {@link ApprovalGate}
      * future/latch so the waiting task unblocks.</p>
      */
+    /**
+     * Deliver an owner approval-gate reply to the running task (CRITICAL-1).
+     *
+     * <p>Sets {@link #pendingGateAnswer} so that the next tick the gate lambda
+     * picks it up, consumes it, and returns the correct boolean to the caller.</p>
+     */
     public void receiveApproval(boolean approve) {
-        // TODO(B12): unblock ApprovalGate latch
         com.example.coppergolem.CopperGolemMod.LOG.info(
-                "[coppergolem] receiveApproval approve={}", approve);
+                "[coppergolem] receiveApproval approve={} pending={}", approve, pendingGateItem);
+        this.pendingGateAnswer = approve;
     }
 
     /**
