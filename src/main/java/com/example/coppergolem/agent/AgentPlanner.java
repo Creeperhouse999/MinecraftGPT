@@ -25,20 +25,32 @@ public final class AgentPlanner {
      * @param worldContext serialized inventory / tool state for resource-aware planning
      * @return ordered plan steps, or empty list on any failure
      */
-    public List<PlanStep> plan(String prompt, String worldContext) {
-        String system =
+    private static String buildSystem(String worldContext) {
+        return
             "You are a Minecraft bot planner. Given a goal and the bot's current world context, " +
             "output ONLY a JSON object with this exact structure:\n" +
             "{\"plan\":[{\"kind\":\"<verb>\",\"args\":{\"key\":\"value\",...},\"label\":\"<human description>\"}...]}\n" +
-            "Valid kind values: sort, mine, chop, deposit, acquire_tool, craft, torch, ore_hunt.\n" +
-            "ore_hunt: targeted ore mining. Example: {\"kind\":\"ore_hunt\",\"args\":{\"ore\":\"diamond\",\"count\":\"30\"}}. " +
-            "The golem strip-mines at the optimal Y level and collects the target ore; it also picks up " +
-            "incidental ores (iron, redstone, lapis, etc.) encountered along the way. " +
-            "The golem will automatically acquire an iron+ pickaxe when required by the ore tier.\n" +
-            "Account for tool durability, spares in inventory, and available inventory space " +
-            "when choosing step counts and args.\n" +
+            "Valid kind values ONLY: sort, mine, chop, deposit, acquire_tool, craft, torch, ore_hunt.\n" +
+            "- sort: sort nearby chests. No args needed.\n" +
+            "- mine: mine blocks. Args: material (cobblestone/dirt/stone/gravel), count (number).\n" +
+            "- chop: chop trees. Args: count (number of trees).\n" +
+            "- ore_hunt: targeted ore mining. Args: ore (coal/iron/gold/diamond/redstone/copper/emerald), count (number).\n" +
+            "- deposit: dump inventory to nearest chest. No args needed.\n" +
+            "- acquire_tool: get or craft a tool. Args: tool (pickaxe/axe).\n" +
+            "- craft: craft an item. Args: item (torch/stick/etc), count.\n" +
+            "IMPORTANT RULES:\n" +
+            "1. If the goal is NOT one of the above tasks (e.g. 'follow me', 'come here', 'go to', 'attack', 'defend', 'build', 'place'), " +
+            "return {\"plan\":[{\"kind\":\"unknown\",\"args\":{},\"label\":\"Task not supported: <goal>\"}]}\n" +
+            "2. NEVER plan to mine near the bot's current position (within 10 blocks) - always move away first.\n" +
+            "3. For mining tasks, only mine cobblestone/stone/dirt/gravel - NOT building materials or ores (use ore_hunt for ores).\n" +
+            "4. Keep plans simple: 1-3 steps maximum.\n" +
+            "Account for tool durability, spares in inventory, and available inventory space.\n" +
             "Return ONLY valid JSON. No markdown, no explanation, no extra keys.\n" +
             "World context:\n" + worldContext;
+    }
+
+    public List<PlanStep> plan(String prompt, String worldContext) {
+        String system = buildSystem(worldContext);
 
         String userText = prompt;
 
@@ -56,19 +68,7 @@ public final class AgentPlanner {
      * @return future resolving to ordered plan steps (empty on failure)
      */
     public CompletableFuture<List<PlanStep>> planAsync(String prompt, String worldContext) {
-        String system =
-            "You are a Minecraft bot planner. Given a goal and the bot's current world context, " +
-            "output ONLY a JSON object with this exact structure:\n" +
-            "{\"plan\":[{\"kind\":\"<verb>\",\"args\":{\"key\":\"value\",...},\"label\":\"<human description>\"}...]}\n" +
-            "Valid kind values: sort, mine, chop, deposit, acquire_tool, craft, torch, ore_hunt.\n" +
-            "ore_hunt: targeted ore mining. Example: {\"kind\":\"ore_hunt\",\"args\":{\"ore\":\"diamond\",\"count\":\"30\"}}. " +
-            "The golem strip-mines at the optimal Y level and collects the target ore; it also picks up " +
-            "incidental ores (iron, redstone, lapis, etc.) encountered along the way. " +
-            "The golem will automatically acquire an iron+ pickaxe when required by the ore tier.\n" +
-            "Account for tool durability, spares in inventory, and available inventory space " +
-            "when choosing step counts and args.\n" +
-            "Return ONLY valid JSON. No markdown, no explanation, no extra keys.\n" +
-            "World context:\n" + worldContext;
+        String system = buildSystem(worldContext);
 
         return ai.generateJsonAsync(system, prompt)
                 .thenApply(opt -> opt.map(AgentPlanner::parse).orElse(Collections.emptyList()));

@@ -342,7 +342,14 @@ public final class PlanExecutor {
                 yield new OreHuntTask(oreArg, oreCount, tools, g);
             }
 
-            default -> null; // unknown kind → step will be skipped
+            case "unknown" -> new TaskHandler() {
+                @Override public boolean tick(GolemPrimitives g) { return true; }
+                @Override public String status() { return "failed: task not supported - " + step.label(); }
+                @Override public void pause() {}
+                @Override public void resume() {}
+            };
+
+            default -> null; // unrecognised kind → step will be skipped
         };
     }
 
