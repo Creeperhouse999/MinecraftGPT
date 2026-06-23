@@ -8,8 +8,10 @@ import com.example.coppergolem.gemini.GroqClient;
 import com.example.coppergolem.inventory.GolemInventory;
 import com.example.coppergolem.net.Packets;
 import com.example.coppergolem.net.ServerNetworking;
+import com.example.coppergolem.task.FollowTask;
 import com.example.coppergolem.task.TaskHandler;
 import com.example.coppergolem.zone.ZoneManager;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -59,6 +61,12 @@ public final class GolemController {
     /** The task currently being driven; null when idle. */
     private TaskHandler current;
     private boolean paused;
+
+    /** Whether the golem is in "follow owner" mode. */
+    private boolean following = false;
+
+    /** The active FollowTask instance (kept to avoid re-creating each tick). */
+    private FollowTask followTask = null;
 
     /** The active multi-step plan runner; null when no job is running. */
     private PlanExecutor executor;
@@ -209,8 +217,41 @@ public final class GolemController {
             executor.stop();
             executor = null;
         }
-        this.current = null;
-        this.paused = false;
+        this.current  = null;
+        this.paused   = false;
+        this.following = false;
+        this.followTask = null;
+    }
+
+    /**
+     * Enter "follow owner" mode: stops any running plan or task, then assigns a
+     * {@link FollowTask} that continuously navigates toward the owner each tick.
+     *
+     * @param ownerPlayer the player to follow (must be non-null at call time;
+     *                    if they go offline the task keeps the last-known goal until
+     *                    their position updates again)
+     */
+    public void startFollow(ServerPlayer ownerPlayer) {
+        stop(); // clear any running plan/task first
+        following  = true;
+        followTask = new FollowTask(() -> {
+            // Re-resolve the player each tick so we track their live position.
+            // Use the stored server reference (set by startFromPrompt / tick).
+            MinecraftServer srv = server != null ? server : level.getServer();
+            if (srv == null) return null;
+            ServerPlayer p = srv.getPlayerList().getPlayer(owner);
+            return p != null ? p.blockPosition() : null;
+        });
+        assign(followTask);
+    }
+
+    /**
+     * Exit "follow owner" mode and go idle.
+     */
+    public void stopFollow() {
+        following  = false;
+        followTask = null;
+        stop();
     }
 
     /** Pause the current task (it stops advancing but is retained). */
@@ -398,7 +439,8 @@ public final class GolemController {
         }
         this.current = null;
         this.paused = false;
-        this.executor = new PlanExecutor(plan, primitives, groq, zones, toolManager, crafts);
+        this.executor = new PlanExecutor(plan, primitives, groq, zones, toolManager, crafts,
+                owner, level.getServer());
         com.example.coppergolem.CopperGolemMod.LOG.info(
                 "[coppergolem] plan applied text={} preApprove={} steps={}", text, preApprove, plan.size());
     }

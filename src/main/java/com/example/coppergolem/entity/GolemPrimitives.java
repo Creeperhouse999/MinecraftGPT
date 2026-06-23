@@ -133,4 +133,20 @@ public interface GolemPrimitives {
      * all four lines are joined with a space.
      */
     String readSignAbove(BlockPos chest);
+
+    // -------------------------------------------------------------------------
+    // Combat (Task 5c)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns the nearest hostile living entity within {@code radius} blocks,
+     * or {@code null} if none are found.
+     */
+    net.minecraft.world.entity.LivingEntity findNearestHostile(int radius);
+
+    /**
+     * Make the golem perform a melee attack on {@code target}.
+     * Plays the swing animation and applies damage.
+     */
+    void attackEntity(net.minecraft.world.entity.LivingEntity target);
 }

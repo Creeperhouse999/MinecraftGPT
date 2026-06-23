@@ -7,12 +7,15 @@ import com.example.coppergolem.gemini.GroqClient;
 import com.example.coppergolem.task.*;
 import com.example.coppergolem.zone.ZoneManager;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -70,6 +73,8 @@ public final class PlanExecutor {
     private final ZoneManager zones;
     private final ToolManager tools;
     private final CraftingHelper crafts;
+    private final UUID ownerId;
+    private final MinecraftServer server;
 
     /** Index of the currently-executing step. */
     private int cursor = 0;
@@ -100,10 +105,23 @@ public final class PlanExecutor {
                         ZoneManager zones,
                         ToolManager tools,
                         CraftingHelper crafts) {
-        this.ai     = ai;
-        this.zones  = zones;
-        this.tools  = tools;
-        this.crafts = crafts;
+        this(plan, g, ai, zones, tools, crafts, null, null);
+    }
+
+    public PlanExecutor(List<PlanStep> plan,
+                        GolemPrimitives g,
+                        GroqClient ai,
+                        ZoneManager zones,
+                        ToolManager tools,
+                        CraftingHelper crafts,
+                        UUID ownerId,
+                        MinecraftServer server) {
+        this.ai      = ai;
+        this.zones   = zones;
+        this.tools   = tools;
+        this.crafts  = crafts;
+        this.ownerId = ownerId;
+        this.server  = server;
 
         List<StepEntry> list = new ArrayList<>(plan.size());
         for (PlanStep step : plan) list.add(new StepEntry(step));
@@ -341,6 +359,30 @@ public final class PlanExecutor {
                 int oreCount   = parseInt(args, "count", 1);
                 yield new OreHuntTask(oreArg, oreCount, tools, g);
             }
+
+            case "follow" -> {
+                final UUID fOwnerId = this.ownerId;
+                final MinecraftServer fServer = this.server;
+                yield new FollowTask(() -> {
+                    if (fServer == null || fOwnerId == null) return null;
+                    ServerPlayer p = fServer.getPlayerList().getPlayer(fOwnerId);
+                    return p != null ? p.blockPosition() : null;
+                });
+            }
+
+            case "come" -> {
+                final UUID cOwnerId = this.ownerId;
+                final MinecraftServer cServer = this.server;
+                yield new ComeTask(() -> {
+                    if (cServer == null || cOwnerId == null) return null;
+                    ServerPlayer p = cServer.getPlayerList().getPlayer(cOwnerId);
+                    return p != null ? p.blockPosition() : null;
+                });
+            }
+
+            case "attack" -> new AttackTask();
+
+            case "defend" -> new DefendTask();
 
             case "unknown" -> new TaskHandler() {
                 @Override public boolean tick(GolemPrimitives g) { return true; }

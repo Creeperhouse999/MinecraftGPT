@@ -10,9 +10,11 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.golem.CopperGolem;
 import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
@@ -487,6 +489,36 @@ public final class WorldGolemPrimitives implements GolemPrimitives {
             }
         }
         return sb.toString();
+    }
+
+    // -------------------------------------------------------------------------
+    // Combat (Task 5c)
+    // -------------------------------------------------------------------------
+
+    @Override
+    public LivingEntity findNearestHostile(int radius) {
+        AABB box = golem.getBoundingBox().inflate(radius);
+        List<Monster> hostiles = level.getEntitiesOfClass(Monster.class, box,
+                e -> !e.isRemoved());
+        if (hostiles.isEmpty()) return null;
+        BlockPos origin = golem.blockPosition();
+        Monster nearest = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Monster m : hostiles) {
+            double d = m.blockPosition().distSqr(origin);
+            if (d < bestDist) {
+                bestDist = d;
+                nearest = m;
+            }
+        }
+        return nearest;
+    }
+
+    @Override
+    public void attackEntity(LivingEntity target) {
+        if (target == null || target.isRemoved()) return;
+        golem.swing(InteractionHand.MAIN_HAND);
+        golem.doHurtTarget(level, target);
     }
 
     // -------------------------------------------------------------------------
