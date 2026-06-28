@@ -1,6 +1,7 @@
 package com.example.coppergolem.task;
 
 import com.example.coppergolem.entity.GolemPrimitives;
+import com.example.coppergolem.entity.ToolManager;
 import net.minecraft.world.entity.LivingEntity;
 
 /**
@@ -21,21 +22,41 @@ public final class AttackTask implements TaskHandler {
     /** Optional mob-type filter (lowercase substring of the type id); null = any hostile. */
     private final String targetType;
 
+    /** Optional tool manager to equip a weapon (sword/axe) before fighting; may be null. */
+    private final ToolManager tools;
+
     private LivingEntity currentTarget = null;
     private String statusMsg = "searching for hostiles";
+    private boolean weaponEquipped = false;
 
     public AttackTask() {
-        this(null);
+        this(null, null);
     }
 
     public AttackTask(String targetType) {
+        this(targetType, null);
+    }
+
+    public AttackTask(String targetType, ToolManager tools) {
         this.targetType = (targetType == null || targetType.isBlank())
                 ? null
                 : targetType.toLowerCase();
+        this.tools = tools;
     }
 
     @Override
     public boolean tick(GolemPrimitives g) {
+        // Equip best weapon once: prefer sword, fall back to axe. Hand/pickaxe work
+        // too but deal less damage. Don't block the fight if neither is available.
+        if (!weaponEquipped && tools != null) {
+            if (g.inventory().findSwordSlot() >= 0) {
+                tools.ensureTool(ToolManager.ToolKind.SWORD);
+            } else if (g.inventory().findAxeSlot() >= 0) {
+                tools.ensureTool(ToolManager.ToolKind.AXE);
+            }
+            weaponEquipped = true; // only attempt once; don't loop crafting
+        }
+
         // Refresh or find a target.
         if (currentTarget == null || currentTarget.isRemoved() || currentTarget.isDeadOrDying()
                 || !matches(currentTarget)) {

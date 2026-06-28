@@ -134,6 +134,16 @@ public class GolemInventory extends SimpleContainer {
         return findToolSlot(ItemTags.AXES);
     }
 
+    /** Returns the index of the first slot containing a shovel, or -1 if none. */
+    public int findShovelSlot() {
+        return findToolSlot(ItemTags.SHOVELS);
+    }
+
+    /** Returns the index of the first slot containing a sword, or -1 if none. */
+    public int findSwordSlot() {
+        return findToolSlot(ItemTags.SWORDS);
+    }
+
     /**
      * Scans storage slots (hotbar + main, [0..STORAGE_SIZE)) for the first
      * stack whose item belongs to {@code tag}. Armor and offhand are excluded.
@@ -184,6 +194,20 @@ public class GolemInventory extends SimpleContainer {
             return false;
         }
         return (t.getMaxDamage() - t.getDamageValue()) <= margin;
+    }
+
+    /**
+     * Returns the active tool's remaining durability as a percent (0-100), or -1
+     * if the active slot is empty or holds a non-damageable item.
+     */
+    public int activeToolDurabilityPct() {
+        ItemStack t = activeTool();
+        if (t.isEmpty() || !t.isDamageableItem()) {
+            return -1;
+        }
+        int max = t.getMaxDamage();
+        if (max <= 0) return -1;
+        return (int) Math.round(100.0 * (max - t.getDamageValue()) / max);
     }
 
     // -------------------------------------------------------------------------

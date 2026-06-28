@@ -405,7 +405,7 @@ public final class PlanExecutor {
                     bServer, bOwnerId, bCrafts, bTools);
             }
 
-            case "attack" -> new AttackTask(args.getOrDefault("target", args.getOrDefault("mob", null)));
+            case "attack" -> new AttackTask(args.getOrDefault("target", args.getOrDefault("mob", null)), tools);
 
             case "defend" -> new DefendTask();
 

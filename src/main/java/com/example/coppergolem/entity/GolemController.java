@@ -75,6 +75,11 @@ public final class GolemController {
     /** Whether the current job was started with owner pre-approval. */
     private boolean jobPreApproved;
 
+    /** Active tool item last tick — used to detect a tool breaking (item → empty). */
+    private net.minecraft.world.item.Item lastActiveToolItem = null;
+    /** True once we've warned the owner about the current low-durability tool. */
+    private boolean lowDurabilityWarned = false;
+
     // -------------------------------------------------------------------------
     // Async approval-gate state (CRITICAL-1)
     // -------------------------------------------------------------------------
@@ -173,6 +178,9 @@ public final class GolemController {
         // Guard: don't tick against a removed/dead entity (IMPORTANT-A).
         if (golem.isRemoved()) return;
 
+        // Tool-break + low-durability awareness: message the owner.
+        checkToolDurability();
+
         // Drive the active plan, if any. The executor manages its own per-step
         // task handlers; clear it once the plan finishes OR fails so a new
         // prompt can replace it (MINOR-L: clear on failed too).
@@ -198,6 +206,46 @@ public final class GolemController {
         boolean done = current.tick(primitives);
         if (done) {
             current = null;
+        }
+    }
+
+    /**
+     * Detect tool breakage and low durability on the active tool, and notify the
+     * owner in chat. A tool "breaks" when the active item changes to empty while
+     * the golem is actively working. Low-durability warns once per tool.
+     */
+    private void checkToolDurability() {
+        net.minecraft.world.item.ItemStack active = inventory.activeTool();
+        net.minecraft.world.item.Item nowItem = active.isEmpty() ? null : active.getItem();
+
+        // Tool just broke: had an item last tick, now empty/different.
+        if (lastActiveToolItem != null && nowItem != lastActiveToolItem) {
+            // Only treat as "broke" if the slot is now empty (vs swapped to another tool).
+            if (nowItem == null) {
+                msgOwner("[Golem] My tool broke! I'll try to get another.");
+            }
+            lowDurabilityWarned = false; // reset for the next tool
+        }
+        lastActiveToolItem = nowItem;
+
+        // Low-durability warning (under 15%), once per tool.
+        if (nowItem != null && !lowDurabilityWarned) {
+            int pct = inventory.activeToolDurabilityPct();
+            if (pct >= 0 && pct <= 15) {
+                msgOwner("[Golem] My " + active.getHoverName().getString()
+                        + " is low (" + pct + "%). I may need a replacement soon.");
+                lowDurabilityWarned = true;
+            }
+        }
+    }
+
+    /** Send a chat message to the owner player if they're online. */
+    private void msgOwner(String text) {
+        MinecraftServer srv = server != null ? server : level.getServer();
+        if (srv == null) return;
+        ServerPlayer p = srv.getPlayerList().getPlayer(owner);
+        if (p != null) {
+            p.sendSystemMessage(net.minecraft.network.chat.Component.literal(text));
         }
     }
 

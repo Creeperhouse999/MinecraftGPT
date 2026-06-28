@@ -27,7 +27,7 @@ import java.util.Set;
  */
 public class ToolManager {
 
-    public enum ToolKind { PICKAXE, AXE }
+    public enum ToolKind { PICKAXE, AXE, SHOVEL, SWORD }
 
     private static final int CHEST_SEARCH_RADIUS = 16;
     private static final int TREE_SEARCH_RADIUS  = 12;
@@ -209,6 +209,8 @@ public class ToolManager {
         return switch (kind) {
             case PICKAXE -> "wooden_pickaxe";
             case AXE     -> "wooden_axe";
+            case SHOVEL  -> "wooden_shovel";
+            case SWORD   -> "wooden_sword";
         };
     }
 
@@ -254,11 +256,9 @@ public class ToolManager {
      * Performs up to {@code GATHER_ATTEMPTS} block breaks.
      */
     private boolean gatherMaterials(ToolKind kind) {
-        if (kind == ToolKind.PICKAXE) {
-            return gatherCobble();
-        } else {
-            return gatherWood();
-        }
+        // All wooden tools (pickaxe/axe/shovel/sword) craft from planks + sticks,
+        // which come from wood. Gather wood for all of them.
+        return gatherWood();
     }
 
     private boolean gatherCobble() {
@@ -299,6 +299,8 @@ public class ToolManager {
         return switch (kind) {
             case PICKAXE -> g.inventory().findPickaxeSlot();
             case AXE     -> g.inventory().findAxeSlot();
+            case SHOVEL  -> g.inventory().findShovelSlot();
+            case SWORD   -> g.inventory().findSwordSlot();
         };
     }
 
