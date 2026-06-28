@@ -26,6 +26,7 @@ jobs:
           ./gradlew clean build
 
       - name: Upload to Falix via SFTP
+        continue-on-error: true
         run: |
           sudo apt-get install -y sshpass
           sshpass -p "${{ secrets.FALIX_PASS }}" sftp -o StrictHostKeyChecking=no -P ${{ secrets.FALIX_PORT }} ${{ secrets.FALIX_USER }}@${{ secrets.FALIX_HOST }} <<EOF
