@@ -35,6 +35,15 @@ public interface GolemPrimitives {
      */
     boolean mineBlock(BlockPos pos);
 
+    /**
+     * Instant block break (no mining delay/animation), for tool-gathering and
+     * internal callers that need to break a block within a single tick.
+     * Respects zone protection and player-built block safety.
+     *
+     * @return true if the block was broken this call
+     */
+    boolean mineBlockInstant(BlockPos pos);
+
     /** Place {@code item} from the golem inventory at {@code pos}. */
     boolean placeBlock(BlockPos pos, Item item);
 
@@ -143,6 +152,9 @@ public interface GolemPrimitives {
      * or {@code null} if none are found.
      */
     net.minecraft.world.entity.LivingEntity findNearestHostile(int radius);
+
+    /** Returns all hostile living entities within {@code radius} blocks. */
+    java.util.List<net.minecraft.world.entity.LivingEntity> findHostiles(int radius);
 
     /**
      * Make the golem perform a melee attack on {@code target}.

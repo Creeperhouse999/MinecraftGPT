@@ -270,7 +270,7 @@ public class ToolManager {
                 for (int dz = -3; dz <= 3 && gathered < GATHER_ATTEMPTS; dz++) {
                     BlockPos candidate = base.offset(dx, dy, dz);
                     String blockId = g.getBlockId(candidate);
-                    if (STONE_BLOCK_IDS.contains(blockId) && g.mineBlock(candidate)) {
+                    if (STONE_BLOCK_IDS.contains(blockId) && g.mineBlockInstant(candidate)) {
                         gathered++;
                         g.pickupNearbyItems(3);
                     }
@@ -286,7 +286,7 @@ public class ToolManager {
         for (BlockPos tree : trees) {
             if (gathered >= GATHER_ATTEMPTS) break;
             // Mine the base log block of each tree
-            if (g.moveTo(tree) && g.mineBlock(tree)) {
+            if (g.moveTo(tree) && g.mineBlockInstant(tree)) {
                 g.pickupNearbyItems(3);
                 gathered++;
             }

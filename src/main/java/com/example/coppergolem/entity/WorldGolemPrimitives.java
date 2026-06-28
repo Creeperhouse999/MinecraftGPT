@@ -159,7 +159,34 @@ public final class WorldGolemPrimitives implements GolemPrimitives {
         // Done — actually break the block
         miningTarget = null;
         level.destroyBlockProgress(golem.getId(), pos, -1); // clear animation
+        return breakBlockNow(pos, state);
+    }
 
+    /**
+     * Instant block break (no delay/animation). Used internally by tool-gathering
+     * and any caller that needs synchronous mining within a single tick. Still
+     * respects zone protection and player-built block safety.
+     *
+     * @return true if the block was broken this call
+     */
+    @Override
+    public boolean mineBlockInstant(BlockPos pos) {
+        if (zones.isProtected(pos.getX(), pos.getZ())) {
+            return false;
+        }
+        BlockState state = level.getBlockState(pos);
+        if (state.isAir()) {
+            return false;
+        }
+        String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        if (isPlayerBuiltBlock(blockId)) {
+            return false;
+        }
+        return breakBlockNow(pos, state);
+    }
+
+    /** Break {@code pos}, capture drop into inventory, sweep + torch. Shared core. */
+    private boolean breakBlockNow(BlockPos pos, BlockState state) {
         ItemStack drop = new ItemStack(state.getBlock().asItem());
         boolean broken = level.destroyBlock(pos, false);
         if (!broken) {
@@ -563,6 +590,13 @@ public final class WorldGolemPrimitives implements GolemPrimitives {
             }
         }
         return nearest;
+    }
+
+    @Override
+    public List<LivingEntity> findHostiles(int radius) {
+        AABB box = golem.getBoundingBox().inflate(radius);
+        return new java.util.ArrayList<>(level.getEntitiesOfClass(Monster.class, box,
+                e -> !e.isRemoved()));
     }
 
     @Override

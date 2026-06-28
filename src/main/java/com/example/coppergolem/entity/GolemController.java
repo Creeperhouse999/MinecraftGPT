@@ -453,8 +453,12 @@ public final class GolemController {
     private String buildWorldContext() {
         net.minecraft.core.BlockPos p = primitives.position();
         int nearbyChests = primitives.findChests(16).size();
+        boolean hasPick = inventory.findPickaxeSlot() >= 0;
+        boolean hasAxe = inventory.findAxeSlot() >= 0;
         return "{\"pos\":[" + p.getX() + "," + p.getY() + "," + p.getZ() + "]"
-                + ",\"nearby_chests\":" + nearbyChests + "}";
+                + ",\"nearby_chests\":" + nearbyChests
+                + ",\"has_pickaxe\":" + hasPick
+                + ",\"has_axe\":" + hasAxe + "}";
     }
 
     /**

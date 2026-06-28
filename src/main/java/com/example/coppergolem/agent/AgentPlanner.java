@@ -51,6 +51,7 @@ public final class AgentPlanner {
             "2. NEVER plan to mine near the bot's current position (within 10 blocks) - always move away first.\n" +
             "3. For mining tasks, only mine cobblestone/stone/dirt/gravel - NOT building materials or ores (use ore_hunt for ores).\n" +
             "4. Keep plans simple: 1-3 steps maximum.\n" +
+            "5. For mine/ore_hunt/chop: if world context shows has_pickaxe=false (or has_axe=false for chop), PREPEND an acquire_tool step. The golem can gather cobble/wood and craft a tool itself. e.g. mining with no pickaxe: [{acquire_tool, tool:pickaxe}, {mine,...}].\n" +
             "Account for tool durability, spares in inventory, and available inventory space.\n" +
             "Return ONLY valid JSON. No markdown, no explanation, no extra keys.\n" +
             "World context:\n" + worldContext;
