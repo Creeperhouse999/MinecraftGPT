@@ -114,7 +114,7 @@ if (Test-Path $configFile) {
     $config | ConvertTo-Json | Out-File -FilePath $configFile -Encoding utf8
     Write-Host "Config created: $configFile" -ForegroundColor Green
     if ($apiKey -eq "") {
-        Write-Host "No API key entered — golem will spawn but won't understand commands." -ForegroundColor Yellow
+        Write-Host "No API key entered - golem will spawn but will not understand commands." -ForegroundColor Yellow
         Write-Host "Edit $configFile later to add your Groq key." -ForegroundColor Yellow
     }
 }
