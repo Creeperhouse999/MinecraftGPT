@@ -405,6 +405,22 @@ public final class PlanExecutor {
                     bServer, bOwnerId, bCrafts, bTools);
             }
 
+            case "build" -> {
+                String shape = args.getOrDefault("shape", "cube");
+                String material = args.getOrDefault("material", args.getOrDefault("item", "minecraft:stone"));
+                int bw = parseInt(args, "w", 3);
+                int bh = parseInt(args, "h", 3);
+                int bl = parseInt(args, "length", parseInt(args, "l", 3));
+                BlockPos origin = g.position();
+                final UUID buildOwner = this.ownerId;
+                final MinecraftServer buildServer = this.server;
+                yield new BuildTask(shape, material, bw, bh, bl, origin, () -> {
+                    if (buildServer == null || buildOwner == null) return null;
+                    ServerPlayer p = buildServer.getPlayerList().getPlayer(buildOwner);
+                    return p != null ? p.blockPosition() : null;
+                });
+            }
+
             case "attack" -> new AttackTask(args.getOrDefault("target", args.getOrDefault("mob", null)), tools);
 
             case "defend" -> new DefendTask();

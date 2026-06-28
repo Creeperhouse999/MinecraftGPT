@@ -30,7 +30,7 @@ public final class AgentPlanner {
             "You are a Minecraft bot planner. Given a goal and the bot's current world context, " +
             "output ONLY a JSON object with this exact structure:\n" +
             "{\"plan\":[{\"kind\":\"<verb>\",\"args\":{\"key\":\"value\",...},\"label\":\"<human description>\"}...]}\n" +
-            "Valid kind values ONLY: sort, mine, chop, deposit, acquire_tool, craft, torch, ore_hunt, follow, come, attack, defend, chat, bring.\n" +
+            "Valid kind values ONLY: sort, mine, chop, deposit, acquire_tool, craft, torch, ore_hunt, follow, come, attack, defend, chat, bring, build.\n" +
             "- sort: sort nearby chests. No args needed.\n" +
             "- mine: dig a tunnel. Args: material (cobblestone/dirt/stone/gravel), w (width, default 1), h (height, default 2), length (blocks deep, default 8), dir (north/south/east/west, default north). For '3x3' use w:3,h:3. For '1x2' use w:1,h:2.\n" +
             "- chop: chop trees. Args: count (number of trees).\n" +
@@ -40,7 +40,8 @@ public final class AgentPlanner {
             "- craft: craft an item. Args: item (torch/stick/etc), count.\n" +
             "- follow: follow the owner continuously. No args. Return {\"kind\":\"follow\",\"args\":{},\"label\":\"Follow owner\"}\n" +
             "- come: move to owner once and stop. No args. Return {\"kind\":\"come\",\"args\":{},\"label\":\"Come to owner\"}\n" +
-            "- attack: attack nearby hostile mobs until area is clear. No args. Return {\"kind\":\"attack\",\"args\":{},\"label\":\"Attack hostiles\"}\n" +
+            "- attack: attack hostile mobs until clear. Optional arg target (mob name like creeper/zombie/skeleton) to attack only that type. The golem equips a sword or axe if it has one.\n" +
+            "- build: place blocks to build a shape. Args: shape (cube/wall/surround), material (block item id like minecraft:stone), w, h, length (dimensions). 'build 3x3x3 stone'→{shape:cube,material:minecraft:stone,w:3,h:3,length:3}. 'surround me with stone'→{shape:surround,material:minecraft:stone}. 'build a stone wall 5 wide 3 tall'→{shape:wall,material:minecraft:stone,w:5,h:3}. The golem must HAVE the blocks; prepend bring/mine/craft steps to obtain material if needed.\n" +
             "- defend: continuously attack any hostile that comes near. No args. Return {\"kind\":\"defend\",\"args\":{},\"label\":\"Defend mode\"}\n" +
             "- chat: reply to any question, greeting, or info request. Args: message (full answer). Use label as SHORT summary max 60 chars. Use for: hi/hello, 'how do I craft X', 'what can you do', 'how to make Y', any general question.\n" +
             "- bring: find item and bring it to owner. Args: item (minecraft item id e.g. minecraft:iron_ingot), count (number). Priority: search chests first, then craft, then mine. Use for 'bring me X', 'get me X', 'fetch X'.\n" +
